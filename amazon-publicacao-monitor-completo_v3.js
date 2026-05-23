@@ -26,7 +26,10 @@ const { chromium } = require('playwright');
 // =====================================================
 
 const PRODUCT_URLS = [
-  'https://www.amazon.es/dp/B0GTM1R6CJ?tag=portugalgeek-21',
+  {
+    url: 'https://www.amazon.es/dp/B0GTM1R6CJ?th=1',
+    couponCode: 'T7K9GGVF',
+  },
 ];
 
 const ASSOC_TAG = 'portugalgeek-21';
@@ -722,7 +725,10 @@ async function ensureCouponApplied(page) {
     found: false,
     alreadyApplied: false,
     clicked: false,
+    selector: '',
+    method: '',
     text: '',
+    error: '',
   };
 
   const body = await safeText(page, 'body');
@@ -736,6 +742,9 @@ async function ensureCouponApplied(page) {
   }
 
   const checkboxSelectors = [
+    'input[id^="checkmarkpctch"]',
+    '[id^="checkmarkpctch"]',
+    'input[type="checkbox"][id*="pctch"]',
     'label:has-text("Aplicar cupão")',
     'label:has-text("Aplicar cupón")',
     'span:has-text("Aplicar cupão")',
@@ -747,10 +756,17 @@ async function ensureCouponApplied(page) {
 
     if (await loc.count().catch(() => 0)) {
       result.found = true;
+      result.selector = selector;
       result.text = cleanSpaces(await loc.innerText({ timeout: 1500 }).catch(() => ''));
 
-      await loc.click({ timeout: 3000 }).catch(() => {});
+      const clickResult = await clickLocatorRobust(loc, { selector });
+      if (!clickResult.clicked) {
+        result.error = clickResult.error || `Falha ao clicar em ${selector}`;
+        continue;
+      }
+
       result.clicked = true;
+      result.method = clickResult.method;
 
       await page.waitForTimeout(1500);
 
@@ -1670,77 +1686,139 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
   const result = {
     attempted: Boolean(couponCode),
     code: couponCode || '',
+    openedSection: false,
     foundInput: false,
     filled: false,
     submitted: false,
+    openSelector: '',
+    innerOpenSelector: '',
     selector: '',
     buttonSelector: '',
+    method: '',
     error: '',
   };
 
   if (!couponCode) return result;
 
   try {
-    const inputSelectors = [
-      'input[name="claimCode"]',
-      'input[name="giftCardPromotionCode"]',
-      'input[id*="promo"]',
-      'input[id*="Promo"]',
-      'input[id*="coupon"]',
-      'input[id*="Coupon"]',
-      'input[placeholder*="código"]',
-      'input[placeholder*="Código"]',
-      'input[placeholder*="promocional"]',
-      'input[aria-label*="código"]',
-      'input[aria-label*="Código"]',
+    const openCandidates = [
+      { locator: page.getByRole('link', { name: /Utilize um cartão oferta/i }), selector: 'role=link[name~/Utilize um cartão oferta/i]' },
+      { locator: page.getByRole('link', { name: /Usar una tarjeta regalo/i }), selector: 'role=link[name~/Usar una tarjeta regalo/i]' },
+      { locator: page.getByRole('link', { name: /tarjeta regalo/i }), selector: 'role=link[name~/tarjeta regalo/i]' },
+      { locator: page.getByRole('link', { name: /cartão oferta/i }), selector: 'role=link[name~/cartão oferta/i]' },
+      { locator: page.getByText(/Utilize um cartão oferta/i), selector: 'text=/Utilize um cartão oferta/i' },
+      { locator: page.getByText(/Usar una tarjeta regalo/i), selector: 'text=/Usar una tarjeta regalo/i' },
+      { locator: page.getByText(/código promocional/i), selector: 'text=/código promocional/i' },
+      { locator: page.getByText(/código de promoción/i), selector: 'text=/código de promoción/i' },
     ];
 
-    for (const selector of inputSelectors) {
-      const input = page.locator(selector).first();
+    for (const item of openCandidates) {
+      const count = await item.locator.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const el = item.locator.nth(i);
+        const clickResult = await clickLocatorRobust(el, { selector: item.selector });
+        if (clickResult.clicked) {
+          result.openedSection = true;
+          result.openSelector = item.selector;
+          result.method = clickResult.method;
+          await page.waitForTimeout(1200);
+          break;
+        }
+      }
+      if (result.openedSection) break;
+    }
+
+    const innerOpenCandidates = [
+      { locator: page.locator('.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)'), selector: '.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)' },
+      { locator: page.getByText(/Introduzir código/i), selector: 'text=/Introduzir código/i' },
+      { locator: page.getByText(/Introducir código/i), selector: 'text=/Introducir código/i' },
+      { locator: page.getByText(/Adicionar código/i), selector: 'text=/Adicionar código/i' },
+      { locator: page.getByText(/Añadir código/i), selector: 'text=/Añadir código/i' },
+    ];
+
+    for (const item of innerOpenCandidates) {
+      const count = await item.locator.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const el = item.locator.nth(i);
+        const clickResult = await clickLocatorRobust(el, { selector: item.selector });
+        if (clickResult.clicked) {
+          result.innerOpenSelector = item.selector;
+          await page.waitForTimeout(1000);
+          break;
+        }
+      }
+      if (result.innerOpenSelector) break;
+    }
+
+    const inputCandidates = [
+      { locator: page.getByTestId('input-claim-code-text-input'), selector: 'testid=input-claim-code-text-input' },
+      { locator: page.locator('[data-testid="input-claim-code-text-input"]'), selector: '[data-testid="input-claim-code-text-input"]' },
+      { locator: page.locator('input[name="claimCode"]'), selector: 'input[name="claimCode"]' },
+      { locator: page.locator('input[name="giftCardPromotionCode"]'), selector: 'input[name="giftCardPromotionCode"]' },
+      { locator: page.locator('input[id*="promo"]'), selector: 'input[id*="promo"]' },
+      { locator: page.locator('input[id*="Promo"]'), selector: 'input[id*="Promo"]' },
+      { locator: page.locator('input[id*="coupon"]'), selector: 'input[id*="coupon"]' },
+      { locator: page.locator('input[id*="Coupon"]'), selector: 'input[id*="Coupon"]' },
+      { locator: page.locator('input[placeholder*="código"]'), selector: 'input[placeholder*="código"]' },
+      { locator: page.locator('input[placeholder*="Código"]'), selector: 'input[placeholder*="Código"]' },
+      { locator: page.locator('input[aria-label*="código"]'), selector: 'input[aria-label*="código"]' },
+      { locator: page.locator('input[aria-label*="Código"]'), selector: 'input[aria-label*="Código"]' },
+    ];
+
+    for (const item of inputCandidates) {
+      const input = item.locator.first();
       if (!(await input.count().catch(() => 0))) continue;
 
       result.foundInput = true;
-      result.selector = selector;
+      result.selector = item.selector;
       await input.scrollIntoViewIfNeeded().catch(() => {});
+      await input.click({ timeout: 5000, force: true }).catch(() => {});
       await input.fill(couponCode, { timeout: 5000 }).catch(async () => {
-        await input.click({ timeout: 5000, force: true }).catch(() => {});
         await input.pressSequentially(couponCode).catch(() => {});
       });
       result.filled = true;
+      break;
+    }
 
-      const buttonSelectors = [
-        'input[name="applyClaimCode"]',
-        'input[type="submit"][value*="Aplicar"]',
-        'button:has-text("Aplicar")',
-        'span:has-text("Aplicar")',
-        'input[type="submit"][value*="Apply"]',
-        'button:has-text("Apply")',
-      ];
-
-      for (const buttonSelector of buttonSelectors) {
-        const button = page.locator(buttonSelector).first();
-        if (!(await button.count().catch(() => 0))) continue;
-
-        const clickResult = await clickLocatorRobust(button, { selector: buttonSelector });
-        if (clickResult.clicked) {
-          result.submitted = true;
-          result.buttonSelector = buttonSelector;
-          await page.waitForTimeout(2500);
-          return result;
-        }
-      }
-
-      result.error = 'Cupão preenchido, mas não encontrei botão Aplicar.';
+    if (!result.foundInput || !result.filled) {
+      result.error = 'Não encontrei/preenchi o campo do código de cupão no checkout.';
       return result;
     }
 
-    result.error = 'Não encontrei campo para inserir código de cupão no checkout.';
+    const buttonCandidates = [
+      { locator: page.getByTestId('bottom-continue-button'), selector: 'testid=bottom-continue-button' },
+      { locator: page.locator('[data-testid="bottom-continue-button"]'), selector: '[data-testid="bottom-continue-button"]' },
+      { locator: page.locator('input[name="applyClaimCode"]'), selector: 'input[name="applyClaimCode"]' },
+      { locator: page.locator('input[type="submit"][value*="Aplicar"]'), selector: 'input[type="submit"][value*="Aplicar"]' },
+      { locator: page.locator('button:has-text("Aplicar")'), selector: 'button:has-text("Aplicar")' },
+      { locator: page.locator('button:has-text("Continuar")'), selector: 'button:has-text("Continuar")' },
+      { locator: page.locator('button:has-text("Continue")'), selector: 'button:has-text("Continue")' },
+      { locator: page.locator('input[type="submit"][value*="Apply"]'), selector: 'input[type="submit"][value*="Apply"]' },
+      { locator: page.locator('button:has-text("Apply")'), selector: 'button:has-text("Apply")' },
+    ];
+
+    for (const item of buttonCandidates) {
+      const button = item.locator.first();
+      if (!(await button.count().catch(() => 0))) continue;
+
+      const clickResult = await clickLocatorRobust(button, { selector: item.selector });
+      if (clickResult.clicked) {
+        result.submitted = true;
+        result.buttonSelector = item.selector;
+        result.method = clickResult.method;
+        await page.waitForTimeout(3000);
+        return result;
+      }
+    }
+
+    result.error = 'Cupão preenchido, mas não encontrei botão para aplicar/continuar.';
     return result;
   } catch (err) {
     result.error = err?.message || String(err);
     return result;
   }
 }
+
 
 function findBestPriceNearWords(text, words) {
   const clean = cleanSpaces(text);
