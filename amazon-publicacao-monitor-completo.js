@@ -100,6 +100,15 @@ const SELECTORS = {
     '#submit.add-to-cart',
   ],
 
+  buyNow: [
+    '#buy-now-button',
+    'input[name="submit.buy-now"]',
+    '#submit\\.buy-now input',
+    'input[title*="Comprar já"]',
+    'input[title*="Comprar ahora"]',
+    'input[aria-labelledby*="submit.buy-now"]',
+  ],
+
   cart: [
     '#nav-cart',
     'a[href*="/cart"]',
@@ -353,6 +362,45 @@ function detectCouponCode(text) {
   return '';
 }
 
+function detectAppliedCouponText(text) {
+  const clean = cleanSpaces(text);
+
+  const patterns = [
+    /cup[aã]o\s+de\s+\d+\s*%\s+de\s+desconto\s+aplicado/i,
+    /cup[oó]n\s+de\s+\d+\s*%\s+de\s+descuento\s+aplicado/i,
+
+    /cup[aã]o\s+de\s+\d+[\.,]\d{2}\s*€\s+de\s+desconto\s+aplicado/i,
+    /cup[oó]n\s+de\s+\d+[\.,]\d{2}\s*€\s+de\s+descuento\s+aplicado/i,
+
+    /cup[aã]o\s+de\s+\d+\s*€\s+de\s+desconto\s+aplicado/i,
+    /cup[oó]n\s+de\s+\d+\s*€\s+de\s+descuento\s+aplicado/i,
+  ];
+
+  return patterns.some(re => re.test(clean));
+}
+
+function extractAppliedCouponText(text) {
+  const clean = cleanSpaces(text);
+
+  const patterns = [
+    /cup[aã]o\s+de\s+\d+\s*%\s+de\s+desconto\s+aplicado/i,
+    /cup[oó]n\s+de\s+\d+\s*%\s+de\s+descuento\s+aplicado/i,
+
+    /cup[aã]o\s+de\s+\d+[\.,]\d{2}\s*€\s+de\s+desconto\s+aplicado/i,
+    /cup[oó]n\s+de\s+\d+[\.,]\d{2}\s*€\s+de\s+descuento\s+aplicado/i,
+
+    /cup[aã]o\s+de\s+\d+\s*€\s+de\s+desconto\s+aplicado/i,
+    /cup[oó]n\s+de\s+\d+\s*€\s+de\s+descuento\s+aplicado/i,
+  ];
+
+  for (const re of patterns) {
+    const match = clean.match(re);
+    if (match?.[0]) return cleanSpaces(match[0]);
+  }
+
+  return '';
+}
+
 function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp }) {
   const text = cleanSpaces(bodyText);
 
@@ -363,11 +411,12 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
     'sns-base-price',
   ]) || Boolean(snsPrice);
 
-  const hasApplyCoupon = includesAny(text, [
+  const appliedCouponText = extractAppliedCouponText(text);
+  const hasAppliedCoupon = detectAppliedCouponText(text) && Boolean(appliedCouponText);
+
+  const hasApplyCoupon = hasAppliedCoupon || includesAny(text, [
     'Aplicar cupón',
     'Aplicar cupão',
-    'Marca la casilla',
-    'Marque a caixa',
     'Cupón aplicado',
     'Cupão aplicado',
   ]);
@@ -428,6 +477,8 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
   return {
     hasSubscribeAndSave,
     hasApplyCoupon,
+    hasAppliedCoupon,
+    appliedCouponText,
     hasCheckoutDiscount,
     hasFlashSale,
     hasPrimeExclusive,
@@ -441,6 +492,7 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
 function detectPromotionKind({
   hasSubscribeAndSave,
   hasApplyCoupon,
+  hasAppliedCoupon,
   hasCheckoutDiscount,
   hasFlashSale,
   hasUnitsPromotion,
@@ -448,16 +500,22 @@ function detectPromotionKind({
   couponCode,
 }) {
   if (hasUnitsPromotion) return 'units';
+
   if (hasSubscribeAndSave && hasApplyCoupon && hasCheckoutDiscount) return 'apply+sns+checkout';
   if (hasSubscribeAndSave && hasCheckoutDiscount) return 'sns+checkout';
   if (hasSubscribeAndSave && hasApplyCoupon) return 'apply+sns';
   if (hasSubscribeAndSave && couponCode) return 'sns+coupon';
   if (hasSubscribeAndSave) return 'sns';
+
+  if (hasAppliedCoupon) return 'apply';
   if (hasApplyCoupon && couponCode) return 'apply+coupon';
   if (hasApplyCoupon && hasCheckoutDiscount) return 'apply+checkout';
+  if (hasApplyCoupon) return 'apply';
+
   if (hasCheckoutDiscount) return 'checkout';
   if (couponCode || hasCouponCodeOnlyAtCheckout) return 'coupon';
   if (hasFlashSale) return 'flash';
+
   return 'normal';
 }
 
@@ -467,9 +525,12 @@ function shouldSimulateCheckout({
   hasCouponCodeOnlyAtCheckout,
   hasSubscribeAndSave,
   hasApplyCoupon,
+  hasAppliedCoupon,
   promotionKind,
   price,
 }) {
+  if (hasAppliedCoupon) return true;
+  if (hasApplyCoupon) return true;
   if (hasUnitsPromotion) return true;
   if (hasCheckoutDiscount) return true;
   if (hasCouponCodeOnlyAtCheckout) return true;
@@ -483,10 +544,100 @@ function shouldSimulateCheckout({
 // CHECKOUT SIMULADO
 // =====================================================
 
+async function ensureCouponApplied(page) {
+  const result = {
+    found: false,
+    alreadyApplied: false,
+    clicked: false,
+    text: '',
+  };
+
+  const body = await safeText(page, 'body');
+  const appliedCouponText = extractAppliedCouponText(body);
+
+  if (appliedCouponText) {
+    result.found = true;
+    result.alreadyApplied = true;
+    result.text = appliedCouponText;
+    return result;
+  }
+
+  const checkboxSelectors = [
+    'label:has-text("Aplicar cupão")',
+    'label:has-text("Aplicar cupón")',
+    'span:has-text("Aplicar cupão")',
+    'span:has-text("Aplicar cupón")',
+  ];
+
+  for (const selector of checkboxSelectors) {
+    const loc = page.locator(selector).first();
+
+    if (await loc.count().catch(() => 0)) {
+      result.found = true;
+      result.text = cleanSpaces(await loc.innerText({ timeout: 1500 }).catch(() => ''));
+
+      await loc.click({ timeout: 3000 }).catch(() => {});
+      result.clicked = true;
+
+      await page.waitForTimeout(1500);
+
+      const bodyAfter = await safeText(page, 'body');
+      const appliedAfter = extractAppliedCouponText(bodyAfter);
+
+      if (appliedAfter) {
+        result.alreadyApplied = true;
+        result.text = appliedAfter;
+      }
+
+      return result;
+    }
+  }
+
+  return result;
+}
+
+async function extractCheckoutFinalPriceFromPage(page) {
+  const selectors = [
+    '[data-shimmer-target="ordertotals-amount"]',
+    '.order-summary-line-definition [data-shimmer-target="ordertotals-amount"]',
+    '#subtotals-marketplace-table [data-shimmer-target="ordertotals-amount"]',
+  ];
+
+  for (const selector of selectors) {
+    const values = await allTexts(page, selector, 20);
+    if (values.length) {
+      return normalizePriceText(values[values.length - 1]);
+    }
+  }
+
+  return '';
+}
+
+function extractCheckoutFinalPrice(text) {
+  const clean = cleanSpaces(text);
+
+  const patterns = [
+    /Total\s+do\s+pedido[^€]{0,300}(\d+[\.,]\d{2}\s*€)/i,
+    /Total\s+del\s+pedido[^€]{0,300}(\d+[\.,]\d{2}\s*€)/i,
+    /Total[^€]{0,300}(\d+[\.,]\d{2}\s*€)/i,
+  ];
+
+  for (const re of patterns) {
+    const m = clean.match(re);
+    if (m?.[1]) return normalizePriceText(m[1]);
+  }
+
+  const allPrices = clean.match(/\d+[\.,]\d{2}\s*€/g);
+  if (!allPrices?.length) return '';
+
+  return normalizePriceText(allPrices[allPrices.length - 1]);
+}
+
 async function simulateCheckout(page, product) {
   const result = {
     attempted: true,
-    addedToCart: false,
+    coupon: null,
+    clickedBuyNow: false,
     reachedCheckoutSummary: false,
     finalPrice: '',
     subtotal: '',
@@ -499,53 +650,49 @@ async function simulateCheckout(page, product) {
     await maybeClosePopups(page);
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
-    const addClicked = await clickFirst(page, SELECTORS.addToCart, { timeout: 7000 });
-    if (!addClicked) {
-      result.error = 'Não encontrei botão Adicionar ao carrinho.';
+    if (
+      product.signals?.hasAppliedCoupon ||
+      product.signals?.hasApplyCoupon ||
+      product.promotionKind === 'apply' ||
+      product.promotionKind?.includes('apply') ||
+      product.promotionKind === 'coupon'
+    ) {
+      result.coupon = await ensureCouponApplied(page);
+    }
+
+    const buyNowClicked = await clickFirst(page, SELECTORS.buyNow, { timeout: 8000 });
+
+    if (!buyNowClicked) {
+      result.error = 'Não encontrei botão Comprar já.';
       return result;
     }
 
-    result.addedToCart = true;
-    await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-    await sleep(2000);
+    result.clickedBuyNow = true;
 
-    // Tenta abrir carrinho, porque é mais seguro ler/remover a partir daí.
-    await clickFirst(page, SELECTORS.cart, { timeout: 4000 });
-    await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-    await sleep(1500);
+    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(4000);
 
-    const cartText = await safeText(page, 'body');
-    result.subtotal = findBestPriceNearWords(cartText, ['Subtotal', 'Total parcial', 'Total', 'Importe']);
-    result.discountText = extractDiscountSummary(cartText);
+    const atFinalButton = await ensureNotAtFinalOrderButton(page);
+    const checkoutText = await safeText(page, 'body');
 
-    // Tenta avançar só até ao checkout/resumo, sem clicar no botão final.
-    const checkoutClicked = await clickFirst(page, SELECTORS.checkout, { timeout: 5000 });
-    if (checkoutClicked) {
-      await page.waitForLoadState('domcontentloaded', { timeout: 20000 }).catch(() => {});
-      await sleep(3000);
+    result.reachedCheckoutSummary = true;
 
-      const atFinalButton = await ensureNotAtFinalOrderButton(page);
-      const checkoutText = await safeText(page, 'body');
-      const checkoutPrice = findBestPriceNearWords(checkoutText, ['Total del pedido', 'Total do pedido', 'Total', 'Importe total']);
+    result.finalPrice =
+      await extractCheckoutFinalPriceFromPage(page) ||
+      extractCheckoutFinalPrice(checkoutText) ||
+      findBestPriceNearWords(checkoutText, ['Total del pedido', 'Total do pedido', 'Total', 'Importe total']);
 
-      result.reachedCheckoutSummary = true;
-      result.finalPrice = checkoutPrice || result.subtotal || '';
-      result.discountText = result.discountText || extractDiscountSummary(checkoutText);
+    result.subtotal = findBestPriceNearWords(checkoutText, ['Produtos', 'Productos', 'Subtotal', 'Total parcial']);
+    result.discountText = extractDiscountSummary(checkoutText);
 
-      if (atFinalButton) {
-        // Segurança: não faz nada aqui. Apenas assinala que encontrou o botão final.
-        result.safetyStop = 'Resumo encontrado. Botão final de compra detetado e ignorado.';
-      }
-    } else {
-      result.finalPrice = result.subtotal || '';
+    if (atFinalButton) {
+      result.safetyStop = 'Resumo encontrado. Botão final de compra detetado e ignorado.';
     }
 
-    // Remove o produto do carrinho no fim.
-    await removeProductFromCart(page, product);
     return result;
   } catch (err) {
     result.error = err?.message || String(err);
-    try { await removeProductFromCart(page, product); } catch {}
     return result;
   }
 }
@@ -668,6 +815,7 @@ function subscriptionNoteIfNeeded(label) {
 
 function detectDiscountLabel(product) {
   const s = product.signals || {};
+  if (s.hasAppliedCoupon) return 'aplicar desconto';
   if (s.hasSubscribeAndSave && product.couponCode) return '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + cupão:';
   if (s.hasSubscribeAndSave && s.hasApplyCoupon && s.hasCheckoutDiscount) return 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout';
   if (s.hasSubscribeAndSave && s.hasCheckoutDiscount) return '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout';
@@ -794,7 +942,7 @@ function formatPublication(product, flags = {}) {
     return formatUnitsCheckoutPublication(product, mergedFlags);
   }
 
-  if (['coupon', 'apply+coupon', 'apply+checkout', 'checkout'].includes(product.promotionKind)) {
+  if (['apply', 'coupon', 'apply+coupon', 'apply+checkout', 'checkout'].includes(product.promotionKind)) {
     return formatCouponDiscountPublication(product, mergedFlags);
   }
 
