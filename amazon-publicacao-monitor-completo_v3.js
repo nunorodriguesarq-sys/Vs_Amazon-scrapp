@@ -745,6 +745,61 @@ async function getCurrentQuantityValue(page) {
   return '';
 }
 
+async function clickLocatorRobust(locator, meta = {}) {
+  const result = {
+    clicked: false,
+    method: '',
+    error: '',
+    ...meta,
+  };
+
+  try {
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+
+    try {
+      await locator.click({ timeout: 5000, force: true });
+      result.clicked = true;
+      result.method = 'playwright-force-click';
+      return result;
+    } catch (err1) {
+      result.error = err1?.message || String(err1);
+    }
+
+    try {
+      const jsClicked = await locator.evaluate(node => {
+        if (!node) return false;
+        node.click();
+        return true;
+      });
+
+      if (jsClicked) {
+        result.clicked = true;
+        result.method = 'js-click';
+        return result;
+      }
+    } catch (err2) {
+      result.error = `${result.error} | JS click: ${err2?.message || String(err2)}`;
+    }
+
+    try {
+      const box = await locator.boundingBox();
+      if (box) {
+        await locator.page().mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        result.clicked = true;
+        result.method = 'mouse-bounding-box-click';
+        return result;
+      }
+    } catch (err3) {
+      result.error = `${result.error} | mouse click: ${err3?.message || String(err3)}`;
+    }
+
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
+}
+
 async function selectSubscribeAndSaveQuantity(page, quantity) {
   const value = String(quantity);
 
@@ -755,7 +810,9 @@ async function selectSubscribeAndSaveQuantity(page, quantity) {
     mode: 'sns',
     method: '',
     dropdownSelector: '',
+    dropdownClickMethod: '',
     optionSelector: '',
+    optionClickMethod: '',
     selectedValue: '',
     error: '',
   };
@@ -788,56 +845,64 @@ async function selectSubscribeAndSaveQuantity(page, quantity) {
         const visible = await dropdown.isVisible().catch(() => false);
         if (!visible) continue;
 
-        await dropdown.scrollIntoViewIfNeeded().catch(() => {});
-        await dropdown.click({ timeout: 5000, force: true });
+        const dropdownClick = await clickLocatorRobust(dropdown, {
+          selector: item.selector,
+        });
+        if (!dropdownClick.clicked) {
+          result.error = dropdownClick.error || `Falha ao abrir dropdown ${item.selector}`;
+          continue;
+        }
 
         result.dropdownSelector = item.selector;
+        result.dropdownClickMethod = dropdownClick.method;
         result.method = 'sns-codegen-dropdown';
 
         await page.waitForTimeout(800);
 
-        const option = page.getByRole('option', { name: value, exact: true });
-
-        if (await option.count().catch(() => 0)) {
-          await option.first().click({ timeout: 5000, force: true });
-
-          result.optionSelector = `role=option[name="${value}"]`;
-
-          await page.waitForTimeout(1200);
-
-          const selectedValue = await getCurrentQuantityValue(page);
-          result.selectedValue = selectedValue || value;
-
-          if (selectedValue === value || !selectedValue) {
-            result.selected = true;
-            return result;
-          }
-        }
-
         const optionIndex = Number(value) - 1;
-        const fallbackOptions = [
-          `#quantity_${optionIndex}`,
-          `#quantity_${optionIndex} span`,
-          `.a-popover a:has-text("${value}")`,
-          `.a-popover li:has-text("${value}")`,
-          `.a-popover span:has-text("${value}")`,
+        const optionLocators = [
+          {
+            locator: page.locator(`#rcxsubsQuan_${optionIndex}`),
+            selector: `#rcxsubsQuan_${optionIndex}`,
+          },
+          {
+            locator: page.locator(`#rcxsubsQuan_${optionIndex} span`),
+            selector: `#rcxsubsQuan_${optionIndex} span`,
+          },
+          {
+            locator: page.locator(`a[data-value='{"stringVal":"${value}"}']`),
+            selector: `a[data-value='{"stringVal":"${value}"}']`,
+          },
+          {
+            locator: page.getByRole('option', { name: value, exact: true }),
+            selector: `role=option[name="${value}"]`,
+          },
+          {
+            locator: page.locator(`.a-popover a:has-text("${value}")`),
+            selector: `.a-popover a:has-text("${value}")`,
+          },
         ];
 
-        for (const selector of fallbackOptions) {
-          const opt = page.locator(selector).first();
+        for (const itemOption of optionLocators) {
+          const opt = itemOption.locator.first();
 
           if (!(await opt.count().catch(() => 0))) continue;
 
-          await opt.click({ timeout: 5000, force: true });
-
-          result.optionSelector = selector;
-
-          await page.waitForTimeout(1200);
+          const clickResult = await clickLocatorRobust(opt, {
+            selector: itemOption.selector,
+          });
+          if (!clickResult.clicked) {
+            result.error = clickResult.error || `Falha ao clicar na opção ${itemOption.selector}`;
+            continue;
+          }
+          result.optionSelector = itemOption.selector;
+          result.optionClickMethod = clickResult.method;
+          await page.waitForTimeout(1500);
 
           const selectedValue = await getCurrentQuantityValue(page);
           result.selectedValue = selectedValue || value;
 
-          if (selectedValue === value || !selectedValue) {
+          if (selectedValue === value || selectedValue === '' || selectedValue == null) {
             result.selected = true;
             return result;
           }
@@ -1119,52 +1184,34 @@ async function clickSubscribeNow(page) {
   };
 
   try {
-    const roleButtons = [
+    const candidates = [
       { locator: page.getByRole('button', { name: 'Subscrever', exact: true }), selector: 'role=button[name="Subscrever"]' },
       { locator: page.getByRole('button', { name: /Subscrever/i }), selector: 'role=button[name~/Subscrever/i]' },
       { locator: page.getByRole('button', { name: /Suscribirse/i }), selector: 'role=button[name~/Suscribirse/i]' },
+      { locator: page.locator('button:has-text("Subscrever")'), selector: 'button:has-text("Subscrever")' },
+      { locator: page.locator('#rcx-subscribe-submit-button'), selector: '#rcx-subscribe-submit-button' },
+      { locator: page.locator('#rcx-subscribe-submit-button-announce'), selector: '#rcx-subscribe-submit-button-announce' },
     ];
 
-    for (const item of roleButtons) {
+    for (const item of candidates) {
       const count = await item.locator.count().catch(() => 0);
 
       for (let i = 0; i < count; i++) {
-        const btn = item.locator.nth(i);
-        const visible = await btn.isVisible().catch(() => false);
-        if (!visible) continue;
-
-        await btn.scrollIntoViewIfNeeded().catch(() => {});
-        await btn.click({ timeout: 8000, force: true });
-
-        result.clicked = true;
-        result.selector = item.selector;
-        result.method = 'role-button-click';
-        return result;
-      }
-    }
-
-    const fallbackSelectors = [
-      'button:has-text("Subscrever")',
-      'button:has-text("Suscribirse")',
-      '#rcx-subscribe-submit-button',
-      '#rcx-subscribe-submit-button-announce',
-    ];
-
-    for (const selector of fallbackSelectors) {
-      const loc = page.locator(selector);
-      const count = await loc.count().catch(() => 0);
-
-      for (let i = 0; i < count; i++) {
-        const el = loc.nth(i);
+        const el = item.locator.nth(i);
         const visible = await el.isVisible().catch(() => false);
         if (!visible) continue;
 
-        await el.scrollIntoViewIfNeeded().catch(() => {});
-        await el.click({ timeout: 8000, force: true });
+        const clickResult = await clickLocatorRobust(el, {
+          selector: item.selector,
+        });
+        if (!clickResult.clicked) {
+          result.error = clickResult.error || `Falha ao clicar em ${item.selector}`;
+          continue;
+        }
 
         result.clicked = true;
-        result.selector = selector;
-        result.method = 'locator-visible-click';
+        result.selector = item.selector;
+        result.method = clickResult.method;
         return result;
       }
     }
