@@ -281,6 +281,10 @@ function isSubscribeAndSaveCheaper(product) {
   return sns < normal;
 }
 
+function shouldUseSubscribeAndSave(product) {
+  return isSubscribeAndSaveCheaper(product);
+}
+
 function detectUnitPromotionText(text) {
   const clean = cleanSpaces(text);
 
@@ -302,7 +306,7 @@ function getCheckoutStrategy(product) {
   const s = product.signals || {};
   const unitPromotionText = s.unitPromotionText || '';
   const qty = getQuantityForUnitPromotion(unitPromotionText);
-  const snsCheaper = isSubscribeAndSaveCheaper(product);
+  const snsCheaper = shouldUseSubscribeAndSave(product);
 
   if (s.hasSubscribeAndSave && snsCheaper && s.hasUnitsPromotion) {
     return { mode: 'sns_units', quantity: qty, reason: 'Subscreve e Poupe é mais barato e existe promoção por unidades' };
@@ -473,6 +477,9 @@ async function scrapeProductPage(page, productUrl) {
 
   const couponCode = detectCouponCode(bodyText);
   const signals = detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp });
+  const snsCheaper = shouldUseSubscribeAndSave({ price, snsPrice });
+  signals.snsCheaper = snsCheaper;
+  signals.useSubscribeAndSave = Boolean(signals.hasSubscribeAndSave && snsCheaper);
   signals.hasCouponCheckboxDom = hasCouponCheckboxDom;
   if (hasCouponCheckboxDom) signals.hasApplyCoupon = true;
   const promotionKind = detectPromotionKind({ ...signals, couponCode, bodyText });
@@ -653,6 +660,7 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
 
 function detectPromotionKind({
   hasSubscribeAndSave,
+  useSubscribeAndSave,
   hasApplyCoupon,
   hasAppliedCoupon,
   hasCouponCheckboxDom,
@@ -664,11 +672,11 @@ function detectPromotionKind({
 }) {
   if (hasUnitsPromotion) return 'units';
 
-  if (hasSubscribeAndSave && hasApplyCoupon && hasCheckoutDiscount) return 'apply+sns+checkout';
-  if (hasSubscribeAndSave && hasCheckoutDiscount) return 'sns+checkout';
-  if (hasSubscribeAndSave && hasApplyCoupon) return 'apply+sns';
-  if (hasSubscribeAndSave && couponCode) return 'sns+coupon';
-  if (hasSubscribeAndSave) return 'sns';
+  if (useSubscribeAndSave && hasApplyCoupon && hasCheckoutDiscount) return 'apply+sns+checkout';
+  if (useSubscribeAndSave && hasCheckoutDiscount) return 'sns+checkout';
+  if (useSubscribeAndSave && hasApplyCoupon) return 'apply+sns';
+  if (useSubscribeAndSave && couponCode) return 'sns+coupon';
+  if (useSubscribeAndSave) return 'sns';
 
   if (hasAppliedCoupon || hasCouponCheckboxDom) return 'apply';
   if (hasApplyCoupon && couponCode) return 'apply+coupon';
@@ -687,6 +695,7 @@ function shouldSimulateCheckout({
   hasUnitsPromotion,
   hasCouponCodeOnlyAtCheckout,
   hasSubscribeAndSave,
+  useSubscribeAndSave,
   hasApplyCoupon,
   hasAppliedCoupon,
   hasCouponCheckboxDom,
@@ -699,7 +708,7 @@ function shouldSimulateCheckout({
   if (hasCheckoutDiscount) return true;
   if (hasCouponCodeOnlyAtCheckout) return true;
   if (promotionKind && promotionKind.includes('checkout')) return true;
-  if (hasSubscribeAndSave && hasApplyCoupon) return true;
+  if (useSubscribeAndSave && hasApplyCoupon) return true;
   if (!price && promotionKind !== 'normal') return true;
 
   return false;
@@ -1753,9 +1762,11 @@ function categoryLine(product) {
 }
 
 function getBestPrice(product) {
+  const useSns = Boolean(product.signals?.useSubscribeAndSave);
+
   return ensureEuro(
     product.checkout?.finalPrice ||
-    product.snsPrice ||
+    (useSns ? product.snsPrice : '') ||
     product.price ||
     ''
   );
@@ -1807,16 +1818,16 @@ function detectDiscountLabel(product) {
     return LABEL_APPLY_SNS_CHECKOUT;
   }
 
-  if (s.hasSubscribeAndSave && s.hasApplyCoupon) {
+  if (s.useSubscribeAndSave && s.hasApplyCoupon) {
     return s.hasCheckoutDiscount
       ? LABEL_APPLY_SNS_CHECKOUT
       : LABEL_APPLY_SNS;
   }
 
   if (s.hasAppliedCoupon) return LABEL_APPLY_DISCOUNT;
-  if (s.hasSubscribeAndSave && product.couponCode) return `${LABEL_SNS} + cupão:`;
-  if (s.hasSubscribeAndSave && s.hasCheckoutDiscount) return LABEL_SNS_CHECKOUT;
-  if (s.hasSubscribeAndSave) return LABEL_SNS;
+  if (s.useSubscribeAndSave && product.couponCode) return `${LABEL_SNS} + cupão:`;
+  if (s.useSubscribeAndSave && s.hasCheckoutDiscount) return LABEL_SNS_CHECKOUT;
+  if (s.useSubscribeAndSave) return LABEL_SNS;
   if (s.hasApplyCoupon && product.couponCode) return 'aplicar desconto + cupão:';
   if (s.hasApplyCoupon && s.hasCheckoutDiscount) return 'aplicar desconto + desconto no checkout';
   if (s.hasCheckoutDiscount) return LABEL_CHECKOUT_DISCOUNT;
@@ -1970,7 +1981,10 @@ function formatPublication(product, flags = {}) {
     return formatUnitsCheckoutPublication(product, mergedFlags);
   }
 
-  if (['sns', 'apply+sns', 'sns+checkout', 'apply+sns+checkout', 'sns+coupon'].includes(product.promotionKind)) {
+  if (
+    product.signals?.useSubscribeAndSave &&
+    ['sns', 'apply+sns', 'sns+checkout', 'apply+sns+checkout', 'sns+coupon'].includes(product.promotionKind)
+  ) {
     return formatAmazonPromoPublication(product, mergedFlags);
   }
 
