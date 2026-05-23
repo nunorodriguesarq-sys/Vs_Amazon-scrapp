@@ -159,7 +159,6 @@ const SELECTORS = {
     ],
     submit: [
       '#rcx-subscribe-submit-button',
-      '#rcx-subscribe-submit-button-announce',
       'button#rcx-subscribe-submit-button-announce',
       'button:has-text("Subscrever")',
       'button:has-text("Suscribirse")',
@@ -172,6 +171,17 @@ const SELECTORS = {
   },
 
   quantity: {
+    visualDropdown: [
+      '#a-autoid-0-announce',
+      '#quantity-button',
+      '#quantityDropdown',
+      'span.a-dropdown-prompt',
+      'span[data-action="a-dropdown-button"]',
+      'span:has-text("Quantidade:")',
+      'span:has-text("Cantidad:")',
+      'span:has-text("Quantidade")',
+      'span:has-text("Cantidad")',
+    ],
     normalDropdown: [
       '#quantity',
       'select[name="quantity"]',
@@ -709,6 +719,87 @@ async function extractCheckoutFinalPriceFromPage(page) {
   return '';
 }
 
+async function getCurrentQuantityValue(page) {
+  const select = page.locator('#quantity, select#quantity, select[name="quantity"]').first();
+
+  if (await select.count().catch(() => 0)) {
+    const value = await select.inputValue().catch(() => '');
+    if (value) return value;
+  }
+
+  const body = await safeText(page, 'body');
+  const match = body.match(/Quantidade:\s*(\d+)|Cantidad:\s*(\d+)/i);
+  if (match) return match[1] || match[2] || '';
+
+  return '';
+}
+
+async function selectQuantityByVisualDropdown(page, quantity, mode = 'normal') {
+  const result = {
+    attempted: true,
+    selected: false,
+    quantity,
+    mode,
+    dropdownSelector: '',
+    optionSelector: '',
+    selectedValue: '',
+    error: '',
+  };
+
+  const value = String(quantity);
+
+  try {
+    const dropdownCandidates = SELECTORS.quantity.visualDropdown;
+
+    for (const selector of dropdownCandidates) {
+      const loc = page.locator(selector).first();
+      if (!(await loc.count().catch(() => 0))) continue;
+
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      await loc.click({ timeout: 5000, force: true }).catch(() => {});
+      result.dropdownSelector = selector;
+      await page.waitForTimeout(700);
+
+      const optionIndex = Number(value) - 1;
+      const optionSelectors = [
+        `div.a-popover-wrapper a:has-text("${value}")`,
+        `div.a-popover-wrapper li:has-text("${value}")`,
+        `div.a-popover-wrapper span:has-text("${value}")`,
+        `.a-popover a:has-text("${value}")`,
+        `.a-popover li:has-text("${value}")`,
+        `.a-popover span:has-text("${value}")`,
+        `#quantity_${optionIndex}`,
+        `#quantity_${optionIndex} span`,
+        `a[data-value='{"stringVal":"${value}"}']`,
+      ];
+
+      for (const optionSelector of optionSelectors) {
+        const option = page.locator(optionSelector).first();
+        if (!(await option.count().catch(() => 0))) continue;
+
+        await option.scrollIntoViewIfNeeded().catch(() => {});
+        await option.click({ timeout: 5000, force: true }).catch(() => {});
+        result.optionSelector = optionSelector;
+        await page.waitForTimeout(1500);
+
+        const selectedValue = await getCurrentQuantityValue(page);
+        result.selectedValue = selectedValue || value;
+
+        if (selectedValue === value || !selectedValue) {
+          result.selected = true;
+          return result;
+        }
+      }
+    }
+
+    result.error = `Não consegui selecionar quantidade ${quantity} pelo dropdown visual.`;
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
+}
+
 async function selectQuantity(page, quantity, mode = 'normal') {
   if (!quantity || quantity <= 1) {
     return { attempted: false, selected: false, quantity: 1, mode, error: '' };
@@ -721,10 +812,21 @@ async function selectQuantity(page, quantity, mode = 'normal') {
     selector: '',
     selectedValue: '',
     availableOptions: [],
+    method: '',
     error: '',
   };
 
   try {
+    if (mode === 'sns') {
+      const visualResult = await selectQuantityByVisualDropdown(page, quantity, mode);
+      if (visualResult.selected) {
+        return {
+          ...visualResult,
+          method: 'visualDropdown',
+        };
+      }
+    }
+
     const selectors = mode === 'sns'
       ? [
           ...SELECTORS.subscribeAndSave.quantityDropdown,
@@ -744,6 +846,7 @@ async function selectQuantity(page, quantity, mode = 'normal') {
         const value = String(quantity);
 
         result.selector = selector;
+        result.method = 'selectOptionFallback';
         result.availableOptions = await loc.locator('option').evaluateAll(options =>
           options.map(o => ({
             value: o.value,
@@ -764,10 +867,26 @@ async function selectQuantity(page, quantity, mode = 'normal') {
         await page.waitForTimeout(1500);
 
         const selectedValue = await loc.inputValue().catch(() => '');
+        if (selectedValue === value) {
+          result.selected = true;
+          result.selector = selector;
+          result.selectedValue = selectedValue;
+          result.method = 'selectOption';
+          return result;
+        }
 
-        result.selected = selectedValue === value || selectedValue === '';
-        result.selectedValue = selectedValue || value;
+        const visualResult = await selectQuantityByVisualDropdown(page, quantity, mode);
+        if (visualResult.selected) {
+          return {
+            ...visualResult,
+            method: 'visualDropdownAfterSelectOptionFailed',
+            availableOptions: result.availableOptions,
+          };
+        }
 
+        result.selected = false;
+        result.selectedValue = selectedValue || '';
+        result.error = `Select encontrado em ${selector}, mas ficou com valor ${selectedValue || 'vazio'} em vez de ${value}.`;
         return result;
       }
 
@@ -788,6 +907,7 @@ async function selectQuantity(page, quantity, mode = 'normal') {
           result.selected = true;
           result.selector = selector;
           result.selectedValue = String(quantity);
+          result.method = 'popoverOption';
           await page.waitForTimeout(1500);
           return result;
         }
@@ -935,7 +1055,7 @@ async function simulateCheckout(page, product) {
         };
       }
 
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(1200);
 
       result.subscribeClick = await clickSubscribeNow(page);
 
