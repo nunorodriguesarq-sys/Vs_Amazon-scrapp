@@ -100,12 +100,6 @@ const SELECTORS = {
   category: '.pg-cat',
   subcategory: '.pg-subcat',
 
-  addToCart: [
-    '#add-to-cart-button',
-    'input[name="submit.add-to-cart"]',
-    '#submit.add-to-cart',
-  ],
-
   buyNow: [
     '#buy-now-button',
     'input[name="submit.buy-now"]',
@@ -114,27 +108,6 @@ const SELECTORS = {
     'input[title*="Comprar ahora"]',
     'input[aria-labelledby*="submit.buy-now"]',
   ],
-
-  cart: [
-    '#nav-cart',
-    'a[href*="/cart"]',
-  ],
-
-  checkout: [
-    'input[name="proceedToRetailCheckout"]',
-    'input[data-feature-id="proceed-to-checkout-action"]',
-    '#sc-buy-box-ptc-button input',
-    'a[name="proceedToRetailCheckout"]',
-  ],
-
-  removeFromCart: [
-    'input[value="Eliminar"]',
-    'input[aria-label*="Eliminar"]',
-    'input[data-action="delete"]',
-    '.sc-action-delete input',
-    'span[data-action="delete"] input',
-  ],
-
 
   subscribeAndSave: {
     option: [
@@ -201,10 +174,6 @@ const SELECTORS = {
 // =====================================================
 // UTILITÁRIOS
 // =====================================================
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 function cleanSpaces(text) {
   return String(text || '')
@@ -1694,34 +1663,6 @@ function extractDiscountSummary(text) {
     if (m?.[0]) return cleanSpaces(m[0]);
   }
   return '';
-}
-
-async function removeProductFromCart(page, product) {
-  try {
-    await page.goto('https://www.amazon.es/cart', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await sleep(1500);
-
-    // Remove todos os itens visíveis no carrinho para garantir limpeza do teste.
-    let removed = 0;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const selector = SELECTORS.removeFromCart.find(asyncSelector => asyncSelector);
-      let clicked = false;
-      for (const sel of SELECTORS.removeFromCart) {
-        const count = await page.locator(sel).count().catch(() => 0);
-        if (count > 0) {
-          await page.locator(sel).first().click({ timeout: 4000 }).catch(() => {});
-          removed++;
-          clicked = true;
-          await sleep(1500);
-          break;
-        }
-      }
-      if (!clicked) break;
-    }
-    return removed;
-  } catch {
-    return 0;
-  }
 }
 
 // =====================================================
