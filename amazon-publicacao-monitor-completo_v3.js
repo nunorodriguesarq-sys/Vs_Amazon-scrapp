@@ -161,8 +161,10 @@ const SELECTORS = {
       '#quantityRelocate_feature_div select',
     ],
     submit: [
-      '#rcx-subscribe-submit-button',
+      '#rcx-subscribe-submit-button-announce',
       'button#rcx-subscribe-submit-button-announce',
+      '#rcx-subscribe-submit-button',
+      '#rcx-subscribe-submit-button button',
       'button:has-text("Subscrever")',
       'button:has-text("Suscribirse")',
       'input[name="submit.subscribe-now"]',
@@ -902,8 +904,9 @@ async function selectSubscribeAndSaveQuantity(page, quantity) {
           const selectedValue = await getCurrentQuantityValue(page);
           result.selectedValue = selectedValue || value;
 
-          if (selectedValue === value || selectedValue === '' || selectedValue == null) {
+          if (clickResult.clicked) {
             result.selected = true;
+            result.selectedValue = selectedValue || value;
             return result;
           }
         }
@@ -1184,13 +1187,85 @@ async function clickSubscribeNow(page) {
   };
 
   try {
+    await page.waitForTimeout(1000);
+
+    const direct = page.locator('#rcx-subscribe-submit-button-announce').first();
+
+    if (await direct.count().catch(() => 0)) {
+      await direct.scrollIntoViewIfNeeded().catch(() => {});
+
+      try {
+        await direct.click({ timeout: 8000, force: true });
+        return {
+          clicked: true,
+          selector: '#rcx-subscribe-submit-button-announce',
+          method: 'direct-force-click',
+          error: '',
+        };
+      } catch (err1) {
+        result.error = err1?.message || String(err1);
+      }
+
+      try {
+        const jsClicked = await direct.evaluate(node => {
+          if (!node) return false;
+          node.click();
+          return true;
+        });
+
+        if (jsClicked) {
+          return {
+            clicked: true,
+            selector: '#rcx-subscribe-submit-button-announce',
+            method: 'direct-js-click',
+            error: '',
+          };
+        }
+      } catch (err2) {
+        result.error = `${result.error} | JS click: ${err2?.message || String(err2)}`;
+      }
+
+      try {
+        const box = await direct.boundingBox();
+        if (box) {
+          await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+          return {
+            clicked: true,
+            selector: '#rcx-subscribe-submit-button-announce',
+            method: 'direct-mouse-bounding-box-click',
+            error: '',
+          };
+        }
+      } catch (err3) {
+        result.error = `${result.error} | mouse click: ${err3?.message || String(err3)}`;
+      }
+    }
+
     const candidates = [
-      { locator: page.getByRole('button', { name: 'Subscrever', exact: true }), selector: 'role=button[name="Subscrever"]' },
-      { locator: page.getByRole('button', { name: /Subscrever/i }), selector: 'role=button[name~/Subscrever/i]' },
-      { locator: page.getByRole('button', { name: /Suscribirse/i }), selector: 'role=button[name~/Suscribirse/i]' },
-      { locator: page.locator('button:has-text("Subscrever")'), selector: 'button:has-text("Subscrever")' },
-      { locator: page.locator('#rcx-subscribe-submit-button'), selector: '#rcx-subscribe-submit-button' },
-      { locator: page.locator('#rcx-subscribe-submit-button-announce'), selector: '#rcx-subscribe-submit-button-announce' },
+      {
+        locator: page.getByRole('button', { name: 'Subscrever', exact: true }),
+        selector: 'role=button[name="Subscrever"]',
+      },
+      {
+        locator: page.getByRole('button', { name: /Subscrever/i }),
+        selector: 'role=button[name~/Subscrever/i]',
+      },
+      {
+        locator: page.getByRole('button', { name: /Suscribirse/i }),
+        selector: 'role=button[name~/Suscribirse/i]',
+      },
+      {
+        locator: page.locator('button:has-text("Subscrever")'),
+        selector: 'button:has-text("Subscrever")',
+      },
+      {
+        locator: page.locator('button:has-text("Suscribirse")'),
+        selector: 'button:has-text("Suscribirse")',
+      },
+      {
+        locator: page.locator('#rcx-subscribe-submit-button'),
+        selector: '#rcx-subscribe-submit-button',
+      },
     ];
 
     for (const item of candidates) {
@@ -1198,31 +1273,57 @@ async function clickSubscribeNow(page) {
 
       for (let i = 0; i < count; i++) {
         const el = item.locator.nth(i);
-        const visible = await el.isVisible().catch(() => false);
-        if (!visible) continue;
 
-        const clickResult = await clickLocatorRobust(el, {
-          selector: item.selector,
-        });
-        if (!clickResult.clicked) {
-          result.error = clickResult.error || `Falha ao clicar em ${item.selector}`;
-          continue;
+        await el.scrollIntoViewIfNeeded().catch(() => {});
+
+        try {
+          await el.click({ timeout: 8000, force: true });
+          return {
+            clicked: true,
+            selector: item.selector,
+            method: 'fallback-force-click',
+            error: '',
+          };
+        } catch (err1) {
+          result.error = err1?.message || String(err1);
         }
 
-        result.clicked = true;
-        result.selector = item.selector;
-        result.method = clickResult.method;
-        return result;
+        try {
+          const jsClicked = await el.evaluate(node => {
+            if (!node) return false;
+            node.click();
+            return true;
+          });
+
+          if (jsClicked) {
+            return {
+              clicked: true,
+              selector: item.selector,
+              method: 'fallback-js-click',
+              error: '',
+            };
+          }
+        } catch (err2) {
+          result.error = `${result.error} | fallback JS click: ${err2?.message || String(err2)}`;
+        }
       }
     }
 
-    result.error = 'Não encontrei botão visível de Subscrever.';
-    return result;
+    return {
+      ...result,
+      clicked: false,
+      selector: '',
+      method: '',
+      error: result.error || 'Não consegui clicar no botão Subscrever.',
+    };
   } catch (err) {
-    result.error = err?.message || String(err);
-    return result;
+    return {
+      ...result,
+      error: err?.message || String(err),
+    };
   }
 }
+
 
 function extractCheckoutFinalPrice(text) {
   const clean = cleanSpaces(text);
