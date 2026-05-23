@@ -138,6 +138,9 @@ const SELECTORS = {
 
   subscribeAndSave: {
     option: [
+      'button:has-text("Subscreva e poupe")',
+      'button:has-text("Subscreve e Poupe")',
+      'button:has-text("Suscríbete y ahorra")',
       '#snsAccordionRowMiddle',
       '#snsAccordionRow',
       '[data-a-accordion-row-name*="sns"]',
@@ -172,6 +175,7 @@ const SELECTORS = {
 
   quantity: {
     visualDropdown: [
+      '#a-autoid-3-announce',
       '#a-autoid-0-announce',
       '#quantity-button',
       '#quantityDropdown',
@@ -760,15 +764,27 @@ async function selectQuantityByVisualDropdown(page, quantity, mode = 'normal') {
       result.dropdownSelector = selector;
       await page.waitForTimeout(700);
 
+      const roleOption = page.getByRole('option', { name: value, exact: true });
+      if (await roleOption.count().catch(() => 0)) {
+        await roleOption.first().click({ timeout: 5000, force: true });
+        result.optionSelector = `role=option[name="${value}"]`;
+        await page.waitForTimeout(1000);
+
+        const selectedValue = await getCurrentQuantityValue(page);
+        result.selectedValue = selectedValue || value;
+        result.selected = selectedValue === value || !selectedValue;
+        return result;
+      }
+
       const optionIndex = Number(value) - 1;
       const optionSelectors = [
-        `div.a-popover-wrapper a:has-text("${value}")`,
-        `div.a-popover-wrapper li:has-text("${value}")`,
-        `div.a-popover-wrapper span:has-text("${value}")`,
+        `#quantity_${optionIndex}`,
         `.a-popover a:has-text("${value}")`,
         `.a-popover li:has-text("${value}")`,
         `.a-popover span:has-text("${value}")`,
-        `#quantity_${optionIndex}`,
+        `div.a-popover-wrapper a:has-text("${value}")`,
+        `div.a-popover-wrapper li:has-text("${value}")`,
+        `div.a-popover-wrapper span:has-text("${value}")`,
         `#quantity_${optionIndex} span`,
         `a[data-value='{"stringVal":"${value}"}']`,
       ];
@@ -931,6 +947,37 @@ async function selectSubscribeAndSaveOption(page) {
   };
 
   try {
+    const roleOptions = [
+      {
+        locator: page.getByRole('button', { name: /Subscreva e poupe/i }),
+        selector: 'role=button[name~/Subscreva e poupe/i]',
+      },
+      {
+        locator: page.getByRole('button', { name: /Subscreve e Poupe/i }),
+        selector: 'role=button[name~/Subscreve e Poupe/i]',
+      },
+      {
+        locator: page.getByRole('button', { name: /Suscríbete y ahorra/i }),
+        selector: 'role=button[name~/Suscríbete y ahorra/i]',
+      },
+    ];
+
+    for (const item of roleOptions) {
+      const count = await item.locator.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const btn = item.locator.nth(i);
+        const visible = await btn.isVisible().catch(() => false);
+        if (!visible) continue;
+
+        await btn.scrollIntoViewIfNeeded().catch(() => {});
+        await btn.click({ timeout: 5000, force: true });
+        result.selected = true;
+        result.selector = item.selector;
+        await page.waitForTimeout(1000);
+        return result;
+      }
+    }
+
     for (const selector of SELECTORS.subscribeAndSave.option) {
       const loc = page.locator(selector).first();
 
@@ -963,33 +1010,62 @@ async function clickSubscribeNow(page) {
   const result = {
     clicked: false,
     selector: '',
+    method: '',
     error: '',
   };
 
   try {
-    for (const selector of SELECTORS.subscribeAndSave.submit) {
-      const loc = page.locator(selector).first();
+    const roleButtons = [
+      { locator: page.getByRole('button', { name: 'Subscrever', exact: true }), selector: 'role=button[name="Subscrever"]' },
+      { locator: page.getByRole('button', { name: /Subscrever/i }), selector: 'role=button[name~/Subscrever/i]' },
+      { locator: page.getByRole('button', { name: /Suscribirse/i }), selector: 'role=button[name~/Suscribirse/i]' },
+    ];
 
-      if (!(await loc.count().catch(() => 0))) continue;
+    for (const item of roleButtons) {
+      const count = await item.locator.count().catch(() => 0);
 
-      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      for (let i = 0; i < count; i++) {
+        const btn = item.locator.nth(i);
+        const visible = await btn.isVisible().catch(() => false);
+        if (!visible) continue;
 
-      const childButton = loc.locator('button').first();
+        await btn.scrollIntoViewIfNeeded().catch(() => {});
+        await btn.click({ timeout: 8000, force: true });
 
-      if (await childButton.count().catch(() => 0)) {
-        await childButton.click({ timeout: 8000, force: true });
         result.clicked = true;
-        result.selector = `${selector} button`;
+        result.selector = item.selector;
+        result.method = 'role-button-click';
         return result;
       }
-
-      await loc.click({ timeout: 8000, force: true });
-      result.clicked = true;
-      result.selector = selector;
-      return result;
     }
 
-    result.error = 'Não encontrei botão de subscrever.';
+    const fallbackSelectors = [
+      'button:has-text("Subscrever")',
+      'button:has-text("Suscribirse")',
+      '#rcx-subscribe-submit-button',
+      '#rcx-subscribe-submit-button-announce',
+    ];
+
+    for (const selector of fallbackSelectors) {
+      const loc = page.locator(selector);
+      const count = await loc.count().catch(() => 0);
+
+      for (let i = 0; i < count; i++) {
+        const el = loc.nth(i);
+        const visible = await el.isVisible().catch(() => false);
+        if (!visible) continue;
+
+        await el.scrollIntoViewIfNeeded().catch(() => {});
+        await el.click({ timeout: 8000, force: true });
+
+        result.clicked = true;
+        result.selector = selector;
+        result.method = 'locator-visible-click';
+        return result;
+      }
+    }
+
+    result.error = 'Não encontrei botão visível de Subscrever.';
     return result;
   } catch (err) {
     result.error = err?.message || String(err);
@@ -1055,7 +1131,7 @@ async function simulateCheckout(page, product) {
         };
       }
 
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(1000);
 
       result.subscribeClick = await clickSubscribeNow(page);
 
