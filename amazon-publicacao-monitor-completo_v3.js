@@ -1733,11 +1733,20 @@ function subscriptionNoteIfNeeded(label) {
 
 function detectDiscountLabel(product) {
   const s = product.signals || {};
+  if (product.promotionKind === 'apply+sns') {
+    return 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲';
+  }
+  if (product.promotionKind === 'apply+sns+checkout') {
+    return 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout';
+  }
+  if (s.hasSubscribeAndSave && s.hasApplyCoupon) {
+    return s.hasCheckoutDiscount
+      ? 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout'
+      : 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲';
+  }
   if (s.hasAppliedCoupon) return 'aplicar desconto';
   if (s.hasSubscribeAndSave && product.couponCode) return '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + cupão:';
-  if (s.hasSubscribeAndSave && s.hasApplyCoupon && s.hasCheckoutDiscount) return 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout';
   if (s.hasSubscribeAndSave && s.hasCheckoutDiscount) return '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout';
-  if (s.hasSubscribeAndSave && s.hasApplyCoupon) return 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲';
   if (s.hasSubscribeAndSave) return '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲';
   if (s.hasApplyCoupon && product.couponCode) return 'aplicar desconto + cupão:';
   if (s.hasApplyCoupon && s.hasCheckoutDiscount) return 'aplicar desconto + desconto no checkout';
@@ -1856,12 +1865,12 @@ function formatPublication(product, flags = {}) {
     return formatUnitsCheckoutPublication(product, mergedFlags);
   }
 
-  if (['apply', 'coupon', 'apply+coupon', 'apply+checkout', 'checkout'].includes(product.promotionKind)) {
-    return formatCouponDiscountPublication(product, mergedFlags);
-  }
-
   if (['sns', 'apply+sns', 'sns+checkout', 'apply+sns+checkout', 'sns+coupon'].includes(product.promotionKind)) {
     return formatAmazonPromoPublication(product, mergedFlags);
+  }
+
+  if (['apply', 'coupon', 'apply+coupon', 'apply+checkout', 'checkout'].includes(product.promotionKind)) {
+    return formatCouponDiscountPublication(product, mergedFlags);
   }
 
   if (product.signals?.hasFlashSale || product.signals?.hasPrimeExclusive) {
