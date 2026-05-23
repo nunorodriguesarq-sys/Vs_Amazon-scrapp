@@ -213,6 +213,13 @@ function cleanSpaces(text) {
     .trim();
 }
 
+function normalizeDynamicTextPart(text) {
+  return String(text || '')
+    .replace(/[\u00A0\u1680\u180E\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 function normalizePriceText(text, { keepEuro = true } = {}) {
   let s = cleanSpaces(text);
   if (!s) return '';
@@ -1805,11 +1812,30 @@ function shouldPrintCouponCode(label) {
   ].includes(label);
 }
 
+function buildPriceLine({ prefix = '💥', price, label, pvp, coupon = '', primePrefixText = '' }) {
+  const safePrefix = normalizeDynamicTextPart(prefix);
+  const safePrice = normalizeDynamicTextPart(price);
+  const safePvp = normalizeDynamicTextPart(pvp);
+  const safeCoupon = coupon ? ` ${normalizeDynamicTextPart(coupon)}` : '';
+  const safePrimePrefix = primePrefixText || '';
+
+  // Importante:
+  // Não normalizar o label internamente.
+  // Apenas remover espaços estranhos no início/fim.
+  const safeLabel = String(label || '').trim();
+
+  return `${safePrefix} ${safePrice} ${safePrimePrefix}${safeLabel}${safeCoupon} (pvp ${safePvp})`;
+}
+
 function formatFlashSalePublication(product, flags = {}) {
   const lines = basePublicationLines(product, flags);
   const price = getBestPrice(product) || 'XX,XX€';
   const label = product.signals?.hasPrimeExclusive ? '𝙚𝙭𝙘𝙡𝙪𝙨𝙞𝙫𝙤 𝙥𝙧𝙞𝙢𝙚' : '𝗳𝗹𝗮𝘀𝗵 𝘀𝗮𝗹𝗲';
-  lines.push(`💥 ${price} ${label} (pvp ${getPvp(product)})`);
+  lines.push(buildPriceLine({
+    price,
+    label,
+    pvp: getPvp(product),
+  }));
   lines.push('');
   lines.push(categoryLine(product));
   return lines.join('\n');
@@ -1819,8 +1845,13 @@ function formatAmazonPromoPublication(product, flags = {}) {
   const lines = basePublicationLines(product, flags);
   const price = getBestPrice(product) || 'XX,XX€';
   const label = detectDiscountLabel(product);
-  const coupon = shouldPrintCouponCode(label) && product.couponCode ? ` ${product.couponCode}` : '';
-  lines.push(`💥 ${price} ${primePrefix(product)}${label}${coupon} (pvp ${getPvp(product)})`);
+  lines.push(buildPriceLine({
+    price,
+    label,
+    pvp: getPvp(product),
+    coupon: shouldPrintCouponCode(label) && product.couponCode ? product.couponCode : '',
+    primePrefixText: primePrefix(product),
+  }));
 
   const note = subscriptionNoteIfNeeded(label);
   if (note) lines.push(note);
@@ -1834,8 +1865,13 @@ function formatCouponDiscountPublication(product, flags = {}) {
   const lines = basePublicationLines(product, flags);
   const price = getBestPrice(product) || 'XX,XX€';
   const label = detectDiscountLabel(product);
-  const coupon = shouldPrintCouponCode(label) && product.couponCode ? ` ${product.couponCode}` : '';
-  lines.push(`💥 ${price} ${primePrefix(product)}${label}${coupon} (pvp ${getPvp(product)})`);
+  lines.push(buildPriceLine({
+    price,
+    label,
+    pvp: getPvp(product),
+    coupon: shouldPrintCouponCode(label) && product.couponCode ? product.couponCode : '',
+    primePrefixText: primePrefix(product),
+  }));
   lines.push('');
   lines.push(categoryLine(product));
   return lines.join('\n');
@@ -1868,7 +1904,11 @@ function formatUnitsCheckoutPublication(product, flags = {}) {
   const pvp = getUnitsPvp(product);
   const lines = basePublicationLines(product, flags);
 
-  lines.push(`${unitsCount} ${unitsLabel} 💥 ${price} ${label} (pvp ${pvp})`);
+  lines.push(`${normalizeDynamicTextPart(unitsCount)} ${normalizeDynamicTextPart(unitsLabel)} ${buildPriceLine({
+    price,
+    label,
+    pvp,
+  })}`);
 
   const note = subscriptionNoteIfNeeded(label);
   if (note) lines.push(note);
