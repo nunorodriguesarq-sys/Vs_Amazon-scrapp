@@ -454,9 +454,20 @@ async function scrapeProductPage(page, productUrl) {
   const subcategoryRaw = await safeText(page, SELECTORS.subcategory);
 
   const bodyText = await safeText(page, 'body');
+  const hasCouponCheckboxDom = await page.locator([
+    'input[id^="checkmarkpctch"]',
+    '[id^="checkmarkpctch"]',
+    'input[type="checkbox"][id*="pctch"]',
+    'label:has-text("Aplicar cupão")',
+    'label:has-text("Aplicar cupón")',
+    'span:has-text("Aplicar cupão")',
+    'span:has-text("Aplicar cupón")'
+  ].join(',')).count().catch(() => 0) > 0;
 
   const couponCode = detectCouponCode(bodyText);
   const signals = detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp });
+  signals.hasCouponCheckboxDom = hasCouponCheckboxDom;
+  if (hasCouponCheckboxDom) signals.hasApplyCoupon = true;
   const promotionKind = detectPromotionKind({ ...signals, couponCode, bodyText });
   const needsCheckout = shouldSimulateCheckout({ ...signals, couponCode, bodyText, promotionKind, price });
   const checkoutStrategy = getCheckoutStrategy({ price, snsPrice, signals });
@@ -544,6 +555,24 @@ function extractAppliedCouponText(text) {
   return '';
 }
 
+
+function hasRealCouponCheckboxText(text) {
+  const clean = cleanSpaces(text).toLowerCase();
+
+  return (
+    clean.includes('aplicar cupón') ||
+    clean.includes('aplicar cupão') ||
+    clean.includes('aplicar cupom') ||
+    clean.includes('cupón aplicado') ||
+    clean.includes('cupão aplicado') ||
+    clean.includes('cupom aplicado') ||
+    /cup[oó]n\s+de\s+\d+\s*%\s+de\s+descuento\s+aplicado/i.test(text) ||
+    /cup[aã]o\s+de\s+\d+\s*%\s+de\s+desconto\s+aplicado/i.test(text) ||
+    /cup[oó]n\s+de\s+\d+[\.,]?\d*\s*€\s+de\s+descuento\s+aplicado/i.test(text) ||
+    /cup[aã]o\s+de\s+\d+[\.,]?\d*\s*€\s+de\s+desconto\s+aplicado/i.test(text)
+  );
+}
+
 function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp }) {
   const text = cleanSpaces(bodyText);
 
@@ -557,21 +586,7 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
   const appliedCouponText = extractAppliedCouponText(text);
   const hasAppliedCoupon = detectAppliedCouponText(text) && Boolean(appliedCouponText);
 
-  const hasApplyCoupon = hasAppliedCoupon || includesAny(text, [
-    'Aplicar cupón',
-    'Aplicar cupão',
-    'Aplicar cupom',
-    'Cupón aplicado',
-    'Cupão aplicado',
-    'Cupom aplicado',
-    'cupón',
-    'cupão',
-    'cupom',
-    'descuento',
-    'desconto',
-    'Ahorra',
-    'Poupe',
-  ]);
+  const hasApplyCoupon = hasAppliedCoupon || hasRealCouponCheckboxText(text);
 
   const hasCheckoutDiscount = includesAny(text, [
     'descuento en el checkout',
@@ -633,6 +648,7 @@ function detectPromotionKind({
   hasSubscribeAndSave,
   hasApplyCoupon,
   hasAppliedCoupon,
+  hasCouponCheckboxDom,
   hasCheckoutDiscount,
   hasFlashSale,
   hasUnitsPromotion,
@@ -647,7 +663,7 @@ function detectPromotionKind({
   if (hasSubscribeAndSave && couponCode) return 'sns+coupon';
   if (hasSubscribeAndSave) return 'sns';
 
-  if (hasAppliedCoupon) return 'apply';
+  if (hasAppliedCoupon || hasCouponCheckboxDom) return 'apply';
   if (hasApplyCoupon && couponCode) return 'apply+coupon';
   if (hasApplyCoupon && hasCheckoutDiscount) return 'apply+checkout';
   if (hasApplyCoupon) return 'apply';
@@ -666,17 +682,19 @@ function shouldSimulateCheckout({
   hasSubscribeAndSave,
   hasApplyCoupon,
   hasAppliedCoupon,
+  hasCouponCheckboxDom,
   promotionKind,
   price,
 }) {
-  if (hasAppliedCoupon) return true;
-  if (hasApplyCoupon) return true;
   if (hasUnitsPromotion) return true;
+  if (hasAppliedCoupon) return true;
+  if (hasCouponCheckboxDom) return true;
   if (hasCheckoutDiscount) return true;
   if (hasCouponCodeOnlyAtCheckout) return true;
-  if (promotionKind.includes('checkout')) return true;
+  if (promotionKind && promotionKind.includes('checkout')) return true;
   if (hasSubscribeAndSave && hasApplyCoupon) return true;
   if (!price && promotionKind !== 'normal') return true;
+
   return false;
 }
 
