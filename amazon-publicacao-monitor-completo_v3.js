@@ -1701,6 +1701,25 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
   if (!couponCode) return result;
 
   try {
+    const inputCandidates = [
+      { locator: page.getByTestId('input-claim-code-text-input'), selector: 'testid=input-claim-code-text-input' },
+      { locator: page.locator('[data-testid="input-claim-code-text-input"]'), selector: '[data-testid="input-claim-code-text-input"]' },
+      { locator: page.locator('input[name="claimCode"]'), selector: 'input[name="claimCode"]' },
+      { locator: page.locator('input[name="giftCardPromotionCode"]'), selector: 'input[name="giftCardPromotionCode"]' },
+      { locator: page.locator('input[id*="claim"]'), selector: 'input[id*="claim"]' },
+      { locator: page.locator('input[id*="Claim"]'), selector: 'input[id*="Claim"]' },
+      { locator: page.locator('input[id*="promo"]'), selector: 'input[id*="promo"]' },
+      { locator: page.locator('input[id*="Promo"]'), selector: 'input[id*="Promo"]' },
+      { locator: page.locator('input[id*="coupon"]'), selector: 'input[id*="coupon"]' },
+      { locator: page.locator('input[id*="Coupon"]'), selector: 'input[id*="Coupon"]' },
+      { locator: page.locator('input[placeholder*="código"]'), selector: 'input[placeholder*="código"]' },
+      { locator: page.locator('input[placeholder*="Código"]'), selector: 'input[placeholder*="Código"]' },
+      { locator: page.locator('input[aria-label*="código"]'), selector: 'input[aria-label*="código"]' },
+      { locator: page.locator('input[aria-label*="Código"]'), selector: 'input[aria-label*="Código"]' },
+    ];
+
+    let inputMatch = await waitForFirstAvailableLocator(page, inputCandidates, 1500);
+
     const openCandidates = [
       { locator: page.getByRole('link', { name: /Utilize um cartão oferta/i }), selector: 'role=link[name~/Utilize um cartão oferta/i]' },
       { locator: page.getByRole('link', { name: /Usar una tarjeta regalo/i }), selector: 'role=link[name~/Usar una tarjeta regalo/i]' },
@@ -1712,78 +1731,70 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
       { locator: page.getByText(/código de promoción/i), selector: 'text=/código de promoción/i' },
     ];
 
-    for (const item of openCandidates) {
-      const count = await item.locator.count().catch(() => 0);
-      for (let i = 0; i < count; i++) {
-        const el = item.locator.nth(i);
-        const clickResult = await clickLocatorRobust(el, { selector: item.selector });
-        if (clickResult.clicked) {
-          result.openedSection = true;
-          result.openSelector = item.selector;
-          result.method = clickResult.method;
-          await page.waitForTimeout(1200);
-          break;
+    if (!inputMatch) {
+      for (const item of openCandidates) {
+        const count = await item.locator.count().catch(() => 0);
+        for (let i = 0; i < count; i++) {
+          const el = item.locator.nth(i);
+          const clickResult = await clickLocatorRobust(el, { selector: item.selector });
+          if (clickResult.clicked) {
+            result.openedSection = true;
+            result.openSelector = item.selector;
+            result.method = clickResult.method;
+            inputMatch = await waitForFirstAvailableLocator(page, inputCandidates, 8000);
+            break;
+          }
         }
+        if (result.openedSection) break;
       }
-      if (result.openedSection) break;
     }
 
-    const innerOpenCandidates = [
-      { locator: page.locator('.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)'), selector: '.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)' },
-      { locator: page.getByText(/Introduzir código/i), selector: 'text=/Introduzir código/i' },
-      { locator: page.getByText(/Introducir código/i), selector: 'text=/Introducir código/i' },
-      { locator: page.getByText(/Adicionar código/i), selector: 'text=/Adicionar código/i' },
-      { locator: page.getByText(/Añadir código/i), selector: 'text=/Añadir código/i' },
-    ];
+    if (!inputMatch) {
+      const innerOpenCandidates = [
+        { locator: page.locator('.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)'), selector: '.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)' },
+        { locator: page.getByText(/Introduzir código/i), selector: 'text=/Introduzir código/i' },
+        { locator: page.getByText(/Introducir código/i), selector: 'text=/Introducir código/i' },
+        { locator: page.getByText(/Adicionar código/i), selector: 'text=/Adicionar código/i' },
+        { locator: page.getByText(/Añadir código/i), selector: 'text=/Añadir código/i' },
+        { locator: page.getByText(/código promocional/i), selector: 'text=/código promocional/i' },
+        { locator: page.getByText(/código de promoción/i), selector: 'text=/código de promoción/i' },
+      ];
 
-    for (const item of innerOpenCandidates) {
-      const count = await item.locator.count().catch(() => 0);
-      for (let i = 0; i < count; i++) {
-        const el = item.locator.nth(i);
-        const clickResult = await clickLocatorRobust(el, { selector: item.selector });
-        if (clickResult.clicked) {
-          result.innerOpenSelector = item.selector;
-          await page.waitForTimeout(1000);
-          break;
+      for (const item of innerOpenCandidates) {
+        const count = await item.locator.count().catch(() => 0);
+        for (let i = 0; i < count; i++) {
+          const el = item.locator.nth(i);
+          const clickResult = await clickLocatorRobust(el, { selector: item.selector });
+          if (clickResult.clicked) {
+            result.innerOpenSelector = item.selector;
+            inputMatch = await waitForFirstAvailableLocator(page, inputCandidates, 8000);
+            break;
+          }
         }
+        if (inputMatch) break;
       }
-      if (result.innerOpenSelector) break;
     }
 
-    const inputCandidates = [
-      { locator: page.getByTestId('input-claim-code-text-input'), selector: 'testid=input-claim-code-text-input' },
-      { locator: page.locator('[data-testid="input-claim-code-text-input"]'), selector: '[data-testid="input-claim-code-text-input"]' },
-      { locator: page.locator('input[name="claimCode"]'), selector: 'input[name="claimCode"]' },
-      { locator: page.locator('input[name="giftCardPromotionCode"]'), selector: 'input[name="giftCardPromotionCode"]' },
-      { locator: page.locator('input[id*="promo"]'), selector: 'input[id*="promo"]' },
-      { locator: page.locator('input[id*="Promo"]'), selector: 'input[id*="Promo"]' },
-      { locator: page.locator('input[id*="coupon"]'), selector: 'input[id*="coupon"]' },
-      { locator: page.locator('input[id*="Coupon"]'), selector: 'input[id*="Coupon"]' },
-      { locator: page.locator('input[placeholder*="código"]'), selector: 'input[placeholder*="código"]' },
-      { locator: page.locator('input[placeholder*="Código"]'), selector: 'input[placeholder*="Código"]' },
-      { locator: page.locator('input[aria-label*="código"]'), selector: 'input[aria-label*="código"]' },
-      { locator: page.locator('input[aria-label*="Código"]'), selector: 'input[aria-label*="Código"]' },
-    ];
-
-    for (const item of inputCandidates) {
-      const input = item.locator.first();
-      if (!(await input.count().catch(() => 0))) continue;
-
-      result.foundInput = true;
-      result.selector = item.selector;
-      await input.scrollIntoViewIfNeeded().catch(() => {});
-      await input.click({ timeout: 5000, force: true }).catch(() => {});
-      await input.fill(couponCode, { timeout: 5000 }).catch(async () => {
-        await input.pressSequentially(couponCode).catch(() => {});
-      });
-      result.filled = true;
-      break;
+    if (!inputMatch) {
+      inputMatch = await waitForFirstAvailableLocator(page, inputCandidates, 8000);
     }
 
-    if (!result.foundInput || !result.filled) {
+    if (!inputMatch) {
       result.error = 'Não encontrei/preenchi o campo do código de cupão no checkout.';
       return result;
     }
+
+    const input = inputMatch.locator;
+    result.foundInput = true;
+    result.selector = inputMatch.selector;
+
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.click({ timeout: 5000, force: true }).catch(() => {});
+    await input.fill(couponCode, { timeout: 5000 }).catch(async () => {
+      await input.pressSequentially(couponCode).catch(() => {});
+    });
+
+    result.filled = true;
 
     const buttonCandidates = [
       { locator: page.getByTestId('bottom-continue-button'), selector: 'testid=bottom-continue-button' },
@@ -1797,26 +1808,60 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
       { locator: page.locator('button:has-text("Apply")'), selector: 'button:has-text("Apply")' },
     ];
 
-    for (const item of buttonCandidates) {
-      const button = item.locator.first();
-      if (!(await button.count().catch(() => 0))) continue;
+    const buttonMatch = await waitForFirstAvailableLocator(page, buttonCandidates, 8000);
 
-      const clickResult = await clickLocatorRobust(button, { selector: item.selector });
-      if (clickResult.clicked) {
-        result.submitted = true;
-        result.buttonSelector = item.selector;
-        result.method = clickResult.method;
-        await page.waitForTimeout(3000);
-        return result;
-      }
+    if (!buttonMatch) {
+      result.error = 'Cupão preenchido, mas não encontrei botão para aplicar/continuar.';
+      return result;
     }
 
-    result.error = 'Cupão preenchido, mas não encontrei botão para aplicar/continuar.';
+    const clickResult = await clickLocatorRobust(buttonMatch.locator, {
+      selector: buttonMatch.selector,
+    });
+
+    if (clickResult.clicked) {
+      result.submitted = true;
+      result.buttonSelector = buttonMatch.selector;
+      result.method = clickResult.method;
+      await page.waitForTimeout(3000);
+      return result;
+    }
+
+    result.error = clickResult.error || 'Falha ao clicar no botão para aplicar/continuar.';
     return result;
   } catch (err) {
     result.error = err?.message || String(err);
     return result;
   }
+}
+
+async function waitForFirstAvailableLocator(page, candidates, timeout = 8000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    for (const item of candidates) {
+      const count = await item.locator.count().catch(() => 0);
+      if (!count) continue;
+
+      for (let i = 0; i < count; i++) {
+        const loc = item.locator.nth(i);
+        const visible = await loc.isVisible().catch(() => false);
+
+        if (visible || item.allowHidden) {
+          return {
+            locator: loc,
+            selector: item.selector,
+            index: i,
+            visible,
+          };
+        }
+      }
+    }
+
+    await page.waitForTimeout(300);
+  }
+
+  return null;
 }
 
 
