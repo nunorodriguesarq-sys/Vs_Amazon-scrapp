@@ -217,6 +217,22 @@ function ensureEuro(text) {
   return `${s}€`;
 }
 
+function normalizeProductInput(input) {
+  if (typeof input === 'string') {
+    return {
+      url: input,
+      manualCouponCode: '',
+      forceCheckout: false,
+    };
+  }
+
+  return {
+    url: input.url || input.href || '',
+    manualCouponCode: input.couponCode || input.manualCouponCode || '',
+    forceCheckout: Boolean(input.forceCheckout || input.couponCode || input.manualCouponCode),
+  };
+}
+
 
 function parsePriceNumber(text) {
   const s = cleanSpaces(text || '')
@@ -413,7 +429,7 @@ async function ensureNotAtFinalOrderButton(page) {
 // EXTRAÇÃO DE DADOS
 // =====================================================
 
-async function scrapeProductPage(page, productUrl) {
+async function scrapeProductPage(page, productUrl, productInput = {}) {
   await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await maybeClosePopups(page);
   await page.waitForLoadState('networkidle', { timeout: 7000 }).catch(() => {});
@@ -444,15 +460,28 @@ async function scrapeProductPage(page, productUrl) {
     'span:has-text("Aplicar cupón")'
   ].join(',')).count().catch(() => 0) > 0;
 
-  const couponCode = detectCouponCode(bodyText);
+  const detectedCouponCode = detectCouponCode(bodyText);
+  const couponCode = productInput.manualCouponCode || detectedCouponCode;
   const signals = detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp });
+  if (productInput.manualCouponCode) {
+    signals.hasManualCouponCode = true;
+    signals.hasCouponCodeOnlyAtCheckout = true;
+  }
   const snsCheaper = shouldUseSubscribeAndSave({ price, snsPrice });
   signals.snsCheaper = snsCheaper;
   signals.useSubscribeAndSave = Boolean(signals.hasSubscribeAndSave && snsCheaper);
   signals.hasCouponCheckboxDom = hasCouponCheckboxDom;
   if (hasCouponCheckboxDom) signals.hasApplyCoupon = true;
-  const promotionKind = detectPromotionKind({ ...signals, couponCode, bodyText });
-  const needsCheckout = shouldSimulateCheckout({ ...signals, couponCode, bodyText, promotionKind, price });
+  let promotionKind = detectPromotionKind({ ...signals, couponCode, bodyText });
+  if (productInput.manualCouponCode && signals.hasCouponCheckboxDom) {
+    promotionKind = 'apply+coupon';
+  } else if (productInput.manualCouponCode) {
+    promotionKind = 'coupon';
+  }
+  const needsCheckout =
+    productInput.forceCheckout ||
+    Boolean(productInput.manualCouponCode) ||
+    shouldSimulateCheckout({ ...signals, couponCode, bodyText, promotionKind, price });
   const checkoutStrategy = getCheckoutStrategy({ price, snsPrice, signals });
 
   return {
@@ -469,6 +498,7 @@ async function scrapeProductPage(page, productUrl) {
     category: hashtagify(categoryRaw, 'categoria'),
     subcategory: hashtagify(subcategoryRaw, 'subcategoria'),
     couponCode,
+    manualInput: productInput,
     signals,
     promotionKind,
     needsCheckout,
@@ -1584,9 +1614,10 @@ async function simulateCheckout(page, product, options = {}) {
       if (
       product.signals?.hasAppliedCoupon ||
       product.signals?.hasApplyCoupon ||
+      product.signals?.hasCouponCheckboxDom ||
       product.promotionKind === 'apply' ||
-      product.promotionKind?.includes('apply') ||
-      product.promotionKind === 'coupon'
+      product.promotionKind === 'apply+coupon' ||
+      product.promotionKind?.includes('apply')
       ) {
         result.coupon = await ensureCouponApplied(page);
       }
@@ -1601,6 +1632,15 @@ async function simulateCheckout(page, product, options = {}) {
     await page.waitForLoadState('domcontentloaded', { timeout: 25000 }).catch(() => {});
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(2000);
+
+    if (product.manualInput?.manualCouponCode) {
+      result.couponCodeApply = await applyCouponCodeAtCheckout(page, product.manualInput.manualCouponCode);
+
+      if (result.couponCodeApply?.submitted) {
+        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+        await page.waitForTimeout(2000);
+      }
+    }
 
     const atFinalButton = await ensureNotAtFinalOrderButton(page);
     const checkoutText = await safeText(page, 'body');
@@ -1619,6 +1659,82 @@ async function simulateCheckout(page, product, options = {}) {
       result.safetyStop = 'Resumo encontrado. Botão final de compra detetado e ignorado.';
     }
 
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
+}
+
+async function applyCouponCodeAtCheckout(page, couponCode) {
+  const result = {
+    attempted: Boolean(couponCode),
+    code: couponCode || '',
+    foundInput: false,
+    filled: false,
+    submitted: false,
+    selector: '',
+    buttonSelector: '',
+    error: '',
+  };
+
+  if (!couponCode) return result;
+
+  try {
+    const inputSelectors = [
+      'input[name="claimCode"]',
+      'input[name="giftCardPromotionCode"]',
+      'input[id*="promo"]',
+      'input[id*="Promo"]',
+      'input[id*="coupon"]',
+      'input[id*="Coupon"]',
+      'input[placeholder*="código"]',
+      'input[placeholder*="Código"]',
+      'input[placeholder*="promocional"]',
+      'input[aria-label*="código"]',
+      'input[aria-label*="Código"]',
+    ];
+
+    for (const selector of inputSelectors) {
+      const input = page.locator(selector).first();
+      if (!(await input.count().catch(() => 0))) continue;
+
+      result.foundInput = true;
+      result.selector = selector;
+      await input.scrollIntoViewIfNeeded().catch(() => {});
+      await input.fill(couponCode, { timeout: 5000 }).catch(async () => {
+        await input.click({ timeout: 5000, force: true }).catch(() => {});
+        await input.pressSequentially(couponCode).catch(() => {});
+      });
+      result.filled = true;
+
+      const buttonSelectors = [
+        'input[name="applyClaimCode"]',
+        'input[type="submit"][value*="Aplicar"]',
+        'button:has-text("Aplicar")',
+        'span:has-text("Aplicar")',
+        'input[type="submit"][value*="Apply"]',
+        'button:has-text("Apply")',
+      ];
+
+      for (const buttonSelector of buttonSelectors) {
+        const button = page.locator(buttonSelector).first();
+        if (!(await button.count().catch(() => 0))) continue;
+
+        const clickResult = await clickLocatorRobust(button, { selector: buttonSelector });
+        if (clickResult.clicked) {
+          result.submitted = true;
+          result.buttonSelector = buttonSelector;
+          await page.waitForTimeout(2500);
+          return result;
+        }
+      }
+
+      result.error = 'Cupão preenchido, mas não encontrei botão Aplicar.';
+      return result;
+    }
+
+    result.error = 'Não encontrei campo para inserir código de cupão no checkout.';
     return result;
   } catch (err) {
     result.error = err?.message || String(err);
@@ -1750,6 +1866,13 @@ function subscriptionNoteIfNeeded(label) {
 
 function detectDiscountLabel(product) {
   const s = product.signals || {};
+  if (product.manualInput?.manualCouponCode && product.promotionKind === 'apply+coupon') {
+    return 'aplicar desconto + cupão:';
+  }
+
+  if (product.manualInput?.manualCouponCode && product.promotionKind === 'coupon') {
+    return 'cupão:';
+  }
 
   if (product.promotionKind === 'apply+sns') {
     return LABEL_APPLY_SNS;
@@ -1945,11 +2068,13 @@ function formatPublication(product, flags = {}) {
 // FLUXO PRINCIPAL
 // =====================================================
 
-async function processProduct(context, url, page) {
+async function processProduct(context, input, page) {
+  const productInput = normalizeProductInput(input);
+  const url = productInput.url;
   const activePage = page || context.pages()[0] || await context.newPage();
 
   console.log(`\n🔎 A abrir: ${url}`);
-  const product = await scrapeProductPage(activePage, url);
+  const product = await scrapeProductPage(activePage, url, productInput);
 
   console.log(`📦 ${product.title || 'Sem título'}`);
   console.log(`🏷️ ASIN: ${product.asin || 'N/A'}`);
