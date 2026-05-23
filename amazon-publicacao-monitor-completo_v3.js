@@ -325,6 +325,11 @@ function extractAsinFromUrl(inputUrl) {
   ).toUpperCase();
 }
 
+function isSameAsinUrl(url, asin) {
+  if (!url || !asin) return false;
+  return extractAsinFromUrl(url) === asin;
+}
+
 function buildAffiliateUrl(url, asin) {
   const targetAsin = asin || extractAsinFromUrl(url);
   if (targetAsin) return `https://www.amazon.es/dp/${targetAsin}?tag=${ASSOC_TAG}`;
@@ -431,7 +436,7 @@ async function ensureNotAtFinalOrderButton(page) {
 async function scrapeProductPage(page, productUrl) {
   await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await maybeClosePopups(page);
-  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 7000 }).catch(() => {});
 
   const url = page.url();
   const asin = extractAsinFromUrl(url) || extractAsinFromUrl(productUrl);
@@ -1471,7 +1476,8 @@ function extractCheckoutFinalPrice(text) {
   return normalizePriceText(allPrices[allPrices.length - 1]);
 }
 
-async function simulateCheckout(page, product) {
+async function simulateCheckout(page, product, options = {}) {
+  const assumeAlreadyOnProductPage = Boolean(options.assumeAlreadyOnProductPage);
   const result = {
     attempted: true,
     coupon: null,
@@ -1484,9 +1490,20 @@ async function simulateCheckout(page, product) {
   };
 
   try {
-    await page.goto(product.currentUrl || product.sourceUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await maybeClosePopups(page);
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    const currentPageUrl = page.url();
+    const alreadyOnSameProduct =
+      assumeAlreadyOnProductPage &&
+      isSameAsinUrl(currentPageUrl, product.asin);
+
+    if (!alreadyOnSameProduct) {
+      console.log('↻ Checkout: página atual não corresponde ao produto, a recarregar URL.');
+      await page.goto(product.currentUrl || product.sourceUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await maybeClosePopups(page);
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    } else {
+      console.log('⚡ Checkout: reutilizando página do produto já aberta.');
+      await maybeClosePopups(page);
+    }
     const strategy = product.checkoutStrategy || getCheckoutStrategy(product);
     result.strategy = strategy;
 
@@ -1578,9 +1595,9 @@ async function simulateCheckout(page, product) {
       result.clickedBuyNow = true;
     }
 
-    await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(4000);
+    await page.waitForLoadState('domcontentloaded', { timeout: 25000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(2000);
 
     const atFinalButton = await ensureNotAtFinalOrderButton(page);
     const checkoutText = await safeText(page, 'body');
@@ -1885,11 +1902,11 @@ function formatPublication(product, flags = {}) {
 // FLUXO PRINCIPAL
 // =====================================================
 
-async function processProduct(context, url) {
-  const page = context.pages()[0] || await context.newPage();
+async function processProduct(context, url, page) {
+  const activePage = page || context.pages()[0] || await context.newPage();
 
   console.log(`\n🔎 A abrir: ${url}`);
-  const product = await scrapeProductPage(page, url);
+  const product = await scrapeProductPage(activePage, url);
 
   console.log(`📦 ${product.title || 'Sem título'}`);
   console.log(`🏷️ ASIN: ${product.asin || 'N/A'}`);
@@ -1898,7 +1915,9 @@ async function processProduct(context, url) {
 
   if (product.needsCheckout) {
     console.log('🛒 A simular carrinho/checkout sem finalizar compra...');
-    product.checkout = await simulateCheckout(page, product);
+    product.checkout = await simulateCheckout(activePage, product, {
+      assumeAlreadyOnProductPage: true,
+    });
     console.log(`✅ Checkout: ${product.checkout.finalPrice || 'sem preço final'} ${product.checkout.error ? `| Erro: ${product.checkout.error}` : ''}`);
   }
 
@@ -1930,12 +1949,10 @@ async function main() {
 
   try {
     const page = context.pages()[0] || await context.newPage();
-    await page.goto('https://www.amazon.es', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-    await maybeClosePopups(page);
 
     for (const url of PRODUCT_URLS) {
       try {
-        const result = await processProduct(context, url);
+        const result = await processProduct(context, url, page);
         results.push(result);
       } catch (err) {
         results.push({ sourceUrl: url, error: err?.message || String(err) });
