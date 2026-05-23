@@ -1719,6 +1719,16 @@ async function removeProductFromCart(page, product) {
 // FORMATAÇÃO DAS PUBLICAÇÕES
 // =====================================================
 
+
+const LABEL_FLASH_SALE = '𝗳𝗹𝗮𝘀𝗵 𝘀𝗮𝗹𝗲';
+const LABEL_SNS = '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲';
+const LABEL_APPLY_DISCOUNT = 'aplicar desconto';
+const LABEL_CHECKOUT_DISCOUNT = 'desconto no checkout';
+const LABEL_APPLY_SNS = `aplicar desconto + ${LABEL_SNS}`;
+const LABEL_SNS_CHECKOUT = `${LABEL_SNS} + desconto no checkout`;
+const LABEL_APPLY_SNS_CHECKOUT = `aplicar desconto + ${LABEL_SNS} + desconto no checkout`;
+const LABEL_EXCLUSIVE_PRIME = '𝙚𝙭𝙘𝙡𝙪𝙨𝙞𝙫𝙤 𝙥𝙧𝙞𝙢𝙚';
+
 function buildFlagsText(flags = {}) {
   const parts = ['#pub_amazon 🇪🇸'];
   if (flags.minimoHistorico) parts.push('❗𝗠𝗜𝗡𝗜𝗠𝗢 𝗛𝗜𝗦𝗧𝗢𝗥𝗜𝗖𝗢❗');
@@ -1768,47 +1778,65 @@ function primePrefix(product) {
   return product.signals?.hasPrimeExclusive ? '𝙚𝙭𝙘𝙡𝙪𝙨𝙞𝙫𝙤 𝙥𝙧𝙞𝙢𝙚 + ' : '';
 }
 
+function isSubscribeAndSaveLabel(label) {
+  const raw = String(label || '').trim();
+
+  return [
+    LABEL_SNS,
+    LABEL_APPLY_SNS,
+    LABEL_SNS_CHECKOUT,
+    LABEL_APPLY_SNS_CHECKOUT,
+    `${LABEL_SNS} + cupão:`,
+  ].includes(raw);
+}
+
 function subscriptionNoteIfNeeded(label) {
-  if (!label || !label.includes('𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲')) return '';
+  if (!isSubscribeAndSaveLabel(label)) return '';
+
   return '𝑠𝑢𝑏𝑠𝑐𝑟𝑖𝑐̧𝑎̃𝑜 𝑐𝑎𝑛𝑐𝑒𝑙𝑎́𝑣𝑒𝑙 𝑎 𝑞𝑢𝑎𝑙𝑞𝑢𝑒𝑟 𝑎𝑙𝑡𝑢𝑟𝑎, 𝑠𝑒𝑚 𝑒𝑛𝑐𝑎𝑟𝑔𝑜𝑠';
 }
 
 function detectDiscountLabel(product) {
   const s = product.signals || {};
+
   if (product.promotionKind === 'apply+sns') {
-    return 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲';
+    return LABEL_APPLY_SNS;
   }
+
   if (product.promotionKind === 'apply+sns+checkout') {
-    return 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout';
+    return LABEL_APPLY_SNS_CHECKOUT;
   }
+
   if (s.hasSubscribeAndSave && s.hasApplyCoupon) {
     return s.hasCheckoutDiscount
-      ? 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout'
-      : 'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲';
+      ? LABEL_APPLY_SNS_CHECKOUT
+      : LABEL_APPLY_SNS;
   }
-  if (s.hasAppliedCoupon) return 'aplicar desconto';
-  if (s.hasSubscribeAndSave && product.couponCode) return '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + cupão:';
-  if (s.hasSubscribeAndSave && s.hasCheckoutDiscount) return '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout';
-  if (s.hasSubscribeAndSave) return '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲';
+
+  if (s.hasAppliedCoupon) return LABEL_APPLY_DISCOUNT;
+  if (s.hasSubscribeAndSave && product.couponCode) return `${LABEL_SNS} + cupão:`;
+  if (s.hasSubscribeAndSave && s.hasCheckoutDiscount) return LABEL_SNS_CHECKOUT;
+  if (s.hasSubscribeAndSave) return LABEL_SNS;
   if (s.hasApplyCoupon && product.couponCode) return 'aplicar desconto + cupão:';
   if (s.hasApplyCoupon && s.hasCheckoutDiscount) return 'aplicar desconto + desconto no checkout';
-  if (s.hasCheckoutDiscount) return 'desconto no checkout';
-  if (s.hasApplyCoupon) return 'aplicar desconto';
+  if (s.hasCheckoutDiscount) return LABEL_CHECKOUT_DISCOUNT;
+  if (s.hasApplyCoupon) return LABEL_APPLY_DISCOUNT;
   if (product.couponCode) return 'cupão:';
-  if (s.hasFlashSale) return '𝗳𝗹𝗮𝘀𝗵 𝘀𝗮𝗹𝗲';
-  return '𝗳𝗹𝗮𝘀𝗵 𝘀𝗮𝗹𝗲';
+  if (s.hasFlashSale) return LABEL_FLASH_SALE;
+
+  return LABEL_FLASH_SALE;
 }
 
 function shouldPrintCouponCode(label) {
   return ![
-    'aplicar desconto',
-    'desconto no checkout',
+    LABEL_APPLY_DISCOUNT,
+    LABEL_CHECKOUT_DISCOUNT,
     'aplicar desconto + desconto no checkout',
-    '𝗳𝗹𝗮𝘀𝗵 𝘀𝗮𝗹𝗲',
-    '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲',
-    'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲',
-    '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout',
-    'aplicar desconto + 𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout',
+    LABEL_FLASH_SALE,
+    LABEL_SNS,
+    LABEL_APPLY_SNS,
+    LABEL_SNS_CHECKOUT,
+    LABEL_APPLY_SNS_CHECKOUT,
   ].includes(label);
 }
 
@@ -1830,12 +1858,14 @@ function buildPriceLine({ prefix = '💥', price, label, pvp, coupon = '', prime
 function formatFlashSalePublication(product, flags = {}) {
   const lines = basePublicationLines(product, flags);
   const price = getBestPrice(product) || 'XX,XX€';
-  const label = product.signals?.hasPrimeExclusive ? '𝙚𝙭𝙘𝙡𝙪𝙨𝙞𝙫𝙤 𝙥𝙧𝙞𝙢𝙚' : '𝗳𝗹𝗮𝘀𝗵 𝘀𝗮𝗹𝗲';
+  const label = product.signals?.hasPrimeExclusive ? LABEL_EXCLUSIVE_PRIME : LABEL_FLASH_SALE;
+
   lines.push(buildPriceLine({
     price,
     label,
     pvp: getPvp(product),
   }));
+
   lines.push('');
   lines.push(categoryLine(product));
   return lines.join('\n');
@@ -1895,8 +1925,8 @@ function formatUnitsCheckoutPublication(product, flags = {}) {
   const s = product.signals || {};
   const usedSns = product.checkoutStrategy?.mode === 'sns_units' || product.checkoutStrategy?.mode === 'sns';
   const label = usedSns
-    ? '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout'
-    : 'desconto no checkout';
+    ? LABEL_SNS_CHECKOUT
+    : LABEL_CHECKOUT_DISCOUNT;
 
   const unitsCount = flags.unitsCount || product.checkoutStrategy?.quantity || '2';
   const unitsLabel = flags.unitsLabel || 'un';
