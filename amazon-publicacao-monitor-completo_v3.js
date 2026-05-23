@@ -555,8 +555,17 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
   const hasApplyCoupon = hasAppliedCoupon || includesAny(text, [
     'Aplicar cupón',
     'Aplicar cupão',
+    'Aplicar cupom',
     'Cupón aplicado',
     'Cupão aplicado',
+    'Cupom aplicado',
+    'cupón',
+    'cupão',
+    'cupom',
+    'descuento',
+    'desconto',
+    'Ahorra',
+    'Poupe',
   ]);
 
   const hasCheckoutDiscount = includesAny(text, [
@@ -720,6 +729,109 @@ async function ensureCouponApplied(page) {
   }
 
   return result;
+}
+
+async function applyCouponCheckboxIfPresent(page) {
+  const result = {
+    attempted: true,
+    found: false,
+    clicked: false,
+    alreadyApplied: false,
+    selector: '',
+    method: '',
+    text: '',
+    error: '',
+  };
+
+  try {
+    const body = await safeText(page, 'body');
+
+    const appliedText = extractAppliedCouponText(body);
+    if (appliedText) {
+      result.found = true;
+      result.alreadyApplied = true;
+      result.text = appliedText;
+      return result;
+    }
+
+    const candidates = [
+      {
+        locator: page.locator('input[id^="checkmarkpctch"]'),
+        selector: 'input[id^="checkmarkpctch"]',
+      },
+      {
+        locator: page.locator('[id^="checkmarkpctch"]'),
+        selector: '[id^="checkmarkpctch"]',
+      },
+      {
+        locator: page.locator('input[type="checkbox"][id*="pctch"]'),
+        selector: 'input[type="checkbox"][id*="pctch"]',
+      },
+      {
+        locator: page.locator('label:has-text("Aplicar cupão")'),
+        selector: 'label:has-text("Aplicar cupão")',
+      },
+      {
+        locator: page.locator('label:has-text("Aplicar cupón")'),
+        selector: 'label:has-text("Aplicar cupón")',
+      },
+      {
+        locator: page.locator('span:has-text("Aplicar cupão")'),
+        selector: 'span:has-text("Aplicar cupão")',
+      },
+      {
+        locator: page.locator('span:has-text("Aplicar cupón")'),
+        selector: 'span:has-text("Aplicar cupón")',
+      },
+    ];
+
+    for (const item of candidates) {
+      const count = await item.locator.count().catch(() => 0);
+
+      for (let i = 0; i < count; i++) {
+        const el = item.locator.nth(i);
+
+        result.found = true;
+        result.selector = item.selector;
+
+        const checked = await el.isChecked?.().catch(() => false);
+        if (checked) {
+          result.alreadyApplied = true;
+          result.clicked = false;
+          result.method = 'already-checked';
+          return result;
+        }
+
+        const clickResult = await clickLocatorRobust(el, {
+          selector: item.selector,
+        });
+
+        if (clickResult.clicked) {
+          result.clicked = true;
+          result.method = clickResult.method;
+          await page.waitForTimeout(1500);
+
+          const bodyAfter = await safeText(page, 'body');
+          const appliedAfter = extractAppliedCouponText(bodyAfter);
+
+          if (appliedAfter) {
+            result.alreadyApplied = true;
+            result.text = appliedAfter;
+          }
+
+          return result;
+        }
+
+        result.error = clickResult.error || `Falha ao clicar em ${item.selector}`;
+      }
+    }
+
+    result.error = 'Não encontrei checkbox de cupão.';
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
 }
 
 async function extractCheckoutFinalPriceFromPage(page) {
@@ -1397,6 +1509,14 @@ async function simulateCheckout(page, product) {
         };
       }
 
+      if (
+        product.signals?.hasApplyCoupon ||
+        product.signals?.hasAppliedCoupon ||
+        product.promotionKind?.includes('apply')
+      ) {
+        result.coupon = await applyCouponCheckboxIfPresent(page);
+      }
+
       await page.waitForTimeout(1000);
 
       result.subscribeClick = await clickSubscribeNow(page);
@@ -1415,6 +1535,15 @@ async function simulateCheckout(page, product) {
           ...result,
           error: result.snsSelection.error || 'Falha ao selecionar Subscreve e Poupe.',
         };
+      }
+
+      if (
+        product.signals?.hasApplyCoupon ||
+        product.signals?.hasAppliedCoupon ||
+        product.promotionKind === 'apply+sns' ||
+        product.promotionKind === 'sns+coupon'
+      ) {
+        result.coupon = await applyCouponCheckboxIfPresent(page);
       }
 
       await page.waitForTimeout(1000);
