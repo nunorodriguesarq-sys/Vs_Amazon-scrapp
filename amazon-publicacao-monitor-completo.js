@@ -44,6 +44,12 @@ const NEVER_CLICK_SELECTORS = [
   'input[aria-labelledby*="submitOrderButtonId"]',
 ];
 
+const UNIT_PROMO_TEXTS = [
+  'Poupe 70% em 1 na compra de2',
+  'Poupe 50% em 1 na compra de2',
+  'Obtenha 3 pelo preço de 2',
+];
+
 // =====================================================
 // SELETORES BASEADOS NOS TEUS TEXT BLAZE
 // =====================================================
@@ -128,6 +134,45 @@ const SELECTORS = {
     '.sc-action-delete input',
     'span[data-action="delete"] input',
   ],
+
+
+  subscribeAndSave: {
+    option: [
+      '#snsAccordionRowMiddle',
+      '#snsAccordionRow',
+      '[data-a-accordion-row-name*="sns"]',
+      'input[value="sns"]',
+      'label:has-text("Suscríbete y ahorra")',
+      'label:has-text("Subscreve e Poupe")',
+      'span:has-text("Suscríbete y ahorra")',
+      'span:has-text("Subscreve e Poupe")',
+    ],
+    quantityDropdown: [
+      '#rcx-subscribe-submit-button-announce',
+      '#sns-quantity-dropdown',
+      'select[name*="quantity"]',
+      'select[id*="quantity"]',
+      'span[data-action="a-dropdown-button"]',
+    ],
+    submit: [
+      '#rcx-subscribe-submit-button',
+      'input[name="submit.subscribe-now"]',
+      'input[value*="Suscribirse"]',
+      'input[value*="Subscrever"]',
+      'span:has-text("Suscribirse ahora")',
+      'span:has-text("Subscrever agora")',
+    ],
+  },
+
+  quantity: {
+    normalDropdown: [
+      '#quantity',
+      'select[name="quantity"]',
+      'select[id="quantity"]',
+      'span[data-action="a-dropdown-button"]:has-text("Quantidade")',
+      'span[data-action="a-dropdown-button"]:has-text("Cantidad")',
+    ],
+  },
 };
 
 // =====================================================
@@ -171,6 +216,60 @@ function ensureEuro(text) {
   const s = priceWithoutEuro(text);
   if (!s) return '';
   return `${s}€`;
+}
+
+
+function parsePriceNumber(text) {
+  const s = cleanSpaces(text || '')
+    .replace(/[^\d,\.]/g, '')
+    .replace(/\.(?=\d{3})/g, '')
+    .replace(',', '.');
+
+  const n = Number.parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function isSubscribeAndSaveCheaper(product) {
+  const normal = parsePriceNumber(product.price);
+  const sns = parsePriceNumber(product.snsPrice);
+
+  if (normal == null || sns == null) return false;
+  return sns < normal;
+}
+
+function detectUnitPromotionText(text) {
+  const clean = cleanSpaces(text);
+
+  for (const promoText of UNIT_PROMO_TEXTS) {
+    if (clean.includes(promoText)) return promoText;
+  }
+
+  return '';
+}
+
+function getQuantityForUnitPromotion(unitPromotionText) {
+  if (unitPromotionText === 'Obtenha 3 pelo preço de 2') return 3;
+  if (unitPromotionText === 'Poupe 70% em 1 na compra de2') return 2;
+  if (unitPromotionText === 'Poupe 50% em 1 na compra de2') return 2;
+  return 1;
+}
+
+function getCheckoutStrategy(product) {
+  const s = product.signals || {};
+  const unitPromotionText = s.unitPromotionText || '';
+  const qty = getQuantityForUnitPromotion(unitPromotionText);
+  const snsCheaper = isSubscribeAndSaveCheaper(product);
+
+  if (s.hasSubscribeAndSave && snsCheaper && s.hasUnitsPromotion) {
+    return { mode: 'sns_units', quantity: qty, reason: 'Subscreve e Poupe é mais barato e existe promoção por unidades' };
+  }
+  if (s.hasSubscribeAndSave && snsCheaper) {
+    return { mode: 'sns', quantity: 1, reason: 'Subscreve e Poupe é mais barato' };
+  }
+  if (s.hasUnitsPromotion) {
+    return { mode: 'normal_units', quantity: qty, reason: 'Promoção por unidades, mas Subscreve e Poupe não é mais barato' };
+  }
+  return { mode: 'normal', quantity: 1, reason: 'Checkout normal' };
 }
 
 function formatPvp(pvp) {
@@ -318,6 +417,7 @@ async function scrapeProductPage(page, productUrl) {
   const signals = detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp });
   const promotionKind = detectPromotionKind({ ...signals, couponCode, bodyText });
   const needsCheckout = shouldSimulateCheckout({ ...signals, couponCode, bodyText, promotionKind, price });
+  const checkoutStrategy = getCheckoutStrategy({ price, snsPrice, signals });
 
   return {
     sourceUrl: productUrl,
@@ -336,6 +436,7 @@ async function scrapeProductPage(page, productUrl) {
     signals,
     promotionKind,
     needsCheckout,
+    checkoutStrategy,
     checkout: null,
     detectedAt: new Date().toISOString(),
   };
@@ -447,21 +548,8 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
     'Exclusivo Prime',
   ]);
 
-  const hasUnitsPromotion = includesAny(text, [
-    'Obtén 3 por el precio de 2',
-    'Obtén 3 por el precio de 2',
-    'Obtenha 3 pelo preço de 2',
-    'Compre 3 e pague 2',
-    'Compra 3 y paga 2',
-    'Compra 2 y paga 1',
-    'Compre 2 e pague 1',
-    'Poupe 50% em 1 na compra de 2',
-    'Ahorra un 50% en 1 al comprar 2',
-    'Poupe 70% em 1 na compra de 2',
-    'Ahorra un 70% en 1 al comprar 2',
-    '2 unidades',
-    '3 por el precio de 2',
-  ]);
+  const unitPromotionText = detectUnitPromotionText(text);
+  const hasUnitsPromotion = Boolean(unitPromotionText);
 
   const hasCouponCodeOnlyAtCheckout = includesAny(text, [
     'Introduce el código',
@@ -483,6 +571,7 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
     hasFlashSale,
     hasPrimeExclusive,
     hasUnitsPromotion,
+    unitPromotionText,
     hasCouponCodeOnlyAtCheckout,
     hasVisiblePrice,
     hasVisiblePvp,
@@ -613,6 +702,87 @@ async function extractCheckoutFinalPriceFromPage(page) {
   return '';
 }
 
+async function selectQuantity(page, quantity, mode = 'normal') {
+  if (!quantity || quantity <= 1) {
+    return { attempted: false, selected: false, quantity: 1, mode, error: '' };
+  }
+  const result = { attempted: true, selected: false, quantity, mode, error: '' };
+  try {
+    const selectors = mode === 'sns'
+      ? SELECTORS.subscribeAndSave.quantityDropdown
+      : SELECTORS.quantity.normalDropdown;
+
+    for (const selector of selectors) {
+      const loc = page.locator(selector).first();
+      if (!(await loc.count().catch(() => 0))) continue;
+      const tagName = await loc.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+      if (tagName === 'select') {
+        await loc.selectOption(String(quantity)).catch(async () => {
+          await loc.selectOption({ label: String(quantity) }).catch(() => {});
+        });
+        result.selected = true;
+        await page.waitForTimeout(1500);
+        return result;
+      }
+      await loc.click({ timeout: 4000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      for (const optionSelector of [`a:has-text("${quantity}")`, `li:has-text("${quantity}")`, `span:has-text("${quantity}")`]) {
+        const option = page.locator(optionSelector).first();
+        if (await option.count().catch(() => 0)) {
+          await option.click({ timeout: 4000 }).catch(() => {});
+          result.selected = true;
+          await page.waitForTimeout(1500);
+          return result;
+        }
+      }
+    }
+    result.error = `Não encontrei dropdown de quantidade para ${mode}.`;
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
+}
+
+async function selectSubscribeAndSaveOption(page) {
+  const result = { attempted: true, selected: false, selector: '', error: '' };
+  try {
+    for (const selector of SELECTORS.subscribeAndSave.option) {
+      const loc = page.locator(selector).first();
+      if (!(await loc.count().catch(() => 0))) continue;
+      await loc.click({ timeout: 5000 }).catch(() => {});
+      result.selected = true;
+      result.selector = selector;
+      await page.waitForTimeout(2000);
+      return result;
+    }
+    result.error = 'Não encontrei opção Subscreve e Poupe.';
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
+}
+
+async function clickSubscribeNow(page) {
+  const result = { clicked: false, selector: '', error: '' };
+  try {
+    for (const selector of SELECTORS.subscribeAndSave.submit) {
+      const loc = page.locator(selector).first();
+      if (!(await loc.count().catch(() => 0))) continue;
+      await loc.click({ timeout: 8000 });
+      result.clicked = true;
+      result.selector = selector;
+      return result;
+    }
+    result.error = 'Não encontrei botão de subscrever.';
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
+}
+
 function extractCheckoutFinalPrice(text) {
   const clean = cleanSpaces(text);
 
@@ -649,25 +819,42 @@ async function simulateCheckout(page, product) {
     await page.goto(product.currentUrl || product.sourceUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await maybeClosePopups(page);
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    const strategy = product.checkoutStrategy || getCheckoutStrategy(product);
+    result.strategy = strategy;
 
-    if (
+    if (strategy.mode === 'sns_units') {
+      result.snsSelection = await selectSubscribeAndSaveOption(page);
+      if (!result.snsSelection.selected) return { ...result, error: result.snsSelection.error || 'Falha ao selecionar Subscreve e Poupe.' };
+      result.quantitySelection = await selectQuantity(page, strategy.quantity, 'sns');
+      if (strategy.quantity > 1 && !result.quantitySelection.selected) return { ...result, error: result.quantitySelection.error || 'Falha ao selecionar quantidade no Subscreve e Poupe.' };
+      result.subscribeClick = await clickSubscribeNow(page);
+      if (!result.subscribeClick.clicked) return { ...result, error: result.subscribeClick.error || 'Falha ao clicar em Subscrever.' };
+    } else if (strategy.mode === 'sns') {
+      result.snsSelection = await selectSubscribeAndSaveOption(page);
+      if (!result.snsSelection.selected) return { ...result, error: result.snsSelection.error || 'Falha ao selecionar Subscreve e Poupe.' };
+      result.subscribeClick = await clickSubscribeNow(page);
+      if (!result.subscribeClick.clicked) return { ...result, error: result.subscribeClick.error || 'Falha ao clicar em Subscrever.' };
+    } else {
+      if (strategy.mode === 'normal_units') {
+        result.quantitySelection = await selectQuantity(page, strategy.quantity, 'normal');
+        if (strategy.quantity > 1 && !result.quantitySelection.selected) return { ...result, error: result.quantitySelection.error || 'Falha ao selecionar quantidade normal.' };
+      }
+      if (
       product.signals?.hasAppliedCoupon ||
       product.signals?.hasApplyCoupon ||
       product.promotionKind === 'apply' ||
       product.promotionKind?.includes('apply') ||
       product.promotionKind === 'coupon'
-    ) {
-      result.coupon = await ensureCouponApplied(page);
+      ) {
+        result.coupon = await ensureCouponApplied(page);
+      }
+      const buyNowClicked = await clickFirst(page, SELECTORS.buyNow, { timeout: 8000 });
+      if (!buyNowClicked) {
+        result.error = 'Não encontrei botão Comprar já.';
+        return result;
+      }
+      result.clickedBuyNow = true;
     }
-
-    const buyNowClicked = await clickFirst(page, SELECTORS.buyNow, { timeout: 8000 });
-
-    if (!buyNowClicked) {
-      result.error = 'Não encontrei botão Comprar já.';
-      return result;
-    }
-
-    result.clickedBuyNow = true;
 
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
@@ -880,31 +1067,27 @@ function formatCouponDiscountPublication(product, flags = {}) {
 }
 
 function detectUnitsPromoLabel(product) {
-  const body = `${product.checkout?.discountText || ''} ${(product.bullets || []).join(' ')} ${product.promotionKind || ''}`;
-  const source = cleanSpaces(body);
-
-  if (includesAny(source, ['3 pelo preço de 2', '3 por el precio de 2', 'Compre 3 e pague 2', 'Compra 3 y paga 2'])) {
+  const text = product.signals?.unitPromotionText || '';
+  if (text === 'Obtenha 3 pelo preço de 2') {
     return '𝗠𝗔𝗜𝗦 𝗣𝗥𝗢𝗗𝗨𝗧𝗢𝗦 COMPRE 𝟯 e PAGUE 𝟮:';
   }
-  if (includesAny(source, ['70% em 1', '70% en 1'])) {
+  if (text === 'Poupe 70% em 1 na compra de2') {
     return '𝗠𝗔𝗜𝗦 𝗣𝗥𝗢𝗗𝗨𝗧𝗢𝗦 2 UNIDADES com 𝟳𝟬% 𝗲𝗺 𝟭:';
   }
-  if (includesAny(source, ['50% em 1', '50% en 1'])) {
+  if (text === 'Poupe 50% em 1 na compra de2') {
     return '𝗠𝗔𝗜𝗦 𝗣𝗥𝗢𝗗𝗨𝗧𝗢𝗦 2 UNIDADES com 𝟱𝟬% 𝗲𝗺 𝟭:';
-  }
-  if (includesAny(source, ['2 e pague 1', '2 y paga 1'])) {
-    return '𝗠𝗔𝗜𝗦 𝗣𝗥𝗢𝗗𝗨𝗧𝗢𝗦 COMPRE com 𝟮 e PAGUE 𝟭:';
   }
   return '';
 }
 
 function formatUnitsCheckoutPublication(product, flags = {}) {
   const s = product.signals || {};
-  const label = s.hasSubscribeAndSave
+  const usedSns = product.checkoutStrategy?.mode === 'sns_units' || product.checkoutStrategy?.mode === 'sns';
+  const label = usedSns
     ? '𝘀𝘂𝗯𝘀𝗰𝗿𝗲𝘃𝗮 𝗲 𝗽𝗼𝘂𝗽𝗲 + desconto no checkout'
     : 'desconto no checkout';
 
-  const unitsCount = flags.unitsCount || '2';
+  const unitsCount = flags.unitsCount || product.checkoutStrategy?.quantity || '2';
   const unitsLabel = flags.unitsLabel || 'un';
   const price = getBestPrice(product) || 'XX,XX€';
   const pvp = getPvp(product);
