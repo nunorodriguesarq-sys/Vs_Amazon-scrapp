@@ -148,14 +148,21 @@ const SELECTORS = {
       'span:has-text("Subscreve e Poupe")',
     ],
     quantityDropdown: [
-      '#rcx-subscribe-submit-button-announce',
-      '#sns-quantity-dropdown',
+      '#quantity',
+      'select#quantity',
+      'select[name="quantity"]',
+      'select[id="quantity"]',
       'select[name*="quantity"]',
       'select[id*="quantity"]',
-      'span[data-action="a-dropdown-button"]',
+      '#selectQuantity select',
+      '#quantityRelocate_feature_div select',
     ],
     submit: [
       '#rcx-subscribe-submit-button',
+      '#rcx-subscribe-submit-button-announce',
+      'button#rcx-subscribe-submit-button-announce',
+      'button:has-text("Subscrever")',
+      'button:has-text("Suscribirse")',
       'input[name="submit.subscribe-now"]',
       'input[value*="Suscribirse"]',
       'input[value*="Subscrever"]',
@@ -706,36 +713,87 @@ async function selectQuantity(page, quantity, mode = 'normal') {
   if (!quantity || quantity <= 1) {
     return { attempted: false, selected: false, quantity: 1, mode, error: '' };
   }
-  const result = { attempted: true, selected: false, quantity, mode, error: '' };
+  const result = {
+    attempted: true,
+    selected: false,
+    quantity,
+    mode,
+    selector: '',
+    selectedValue: '',
+    availableOptions: [],
+    error: '',
+  };
+
   try {
     const selectors = mode === 'sns'
-      ? SELECTORS.subscribeAndSave.quantityDropdown
+      ? [
+          ...SELECTORS.subscribeAndSave.quantityDropdown,
+          ...SELECTORS.quantity.normalDropdown,
+        ]
       : SELECTORS.quantity.normalDropdown;
 
     for (const selector of selectors) {
       const loc = page.locator(selector).first();
       if (!(await loc.count().catch(() => 0))) continue;
+
       const tagName = await loc.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
+
       if (tagName === 'select') {
-        await loc.selectOption(String(quantity)).catch(async () => {
-          await loc.selectOption({ label: String(quantity) }).catch(() => {});
+        await loc.scrollIntoViewIfNeeded().catch(() => {});
+
+        const value = String(quantity);
+
+        result.selector = selector;
+        result.availableOptions = await loc.locator('option').evaluateAll(options =>
+          options.map(o => ({
+            value: o.value,
+            text: o.textContent?.trim() || '',
+            selected: o.selected,
+          }))
+        ).catch(() => []);
+
+        await loc.selectOption(value).catch(async () => {
+          await loc.selectOption({ label: value }).catch(() => {});
         });
-        result.selected = true;
+
+        await loc.evaluate(el => {
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }).catch(() => {});
+
         await page.waitForTimeout(1500);
+
+        const selectedValue = await loc.inputValue().catch(() => '');
+
+        result.selected = selectedValue === value || selectedValue === '';
+        result.selectedValue = selectedValue || value;
+
         return result;
       }
+
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
       await loc.click({ timeout: 4000 }).catch(() => {});
       await page.waitForTimeout(500);
-      for (const optionSelector of [`a:has-text("${quantity}")`, `li:has-text("${quantity}")`, `span:has-text("${quantity}")`]) {
+
+      const optionSelectors = [
+        `.a-popover a:has-text("${quantity}")`,
+        `.a-popover li:has-text("${quantity}")`,
+        `.a-popover span:has-text("${quantity}")`,
+      ];
+
+      for (const optionSelector of optionSelectors) {
         const option = page.locator(optionSelector).first();
         if (await option.count().catch(() => 0)) {
           await option.click({ timeout: 4000 }).catch(() => {});
           result.selected = true;
+          result.selector = selector;
+          result.selectedValue = String(quantity);
           await page.waitForTimeout(1500);
           return result;
         }
       }
     }
+
     result.error = `Não encontrei dropdown de quantidade para ${mode}.`;
     return result;
   } catch (err) {
@@ -745,17 +803,34 @@ async function selectQuantity(page, quantity, mode = 'normal') {
 }
 
 async function selectSubscribeAndSaveOption(page) {
-  const result = { attempted: true, selected: false, selector: '', error: '' };
+  const result = {
+    attempted: true,
+    selected: false,
+    selector: '',
+    error: '',
+  };
+
   try {
     for (const selector of SELECTORS.subscribeAndSave.option) {
       const loc = page.locator(selector).first();
+
       if (!(await loc.count().catch(() => 0))) continue;
-      await loc.click({ timeout: 5000 }).catch(() => {});
+
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      await loc.click({ timeout: 5000, force: true }).catch(async () => {
+        const input = loc.locator('input[type="radio"], input[type="checkbox"]').first();
+        if (await input.count().catch(() => 0)) {
+          await input.click({ timeout: 5000, force: true }).catch(() => {});
+        }
+      });
+
       result.selected = true;
       result.selector = selector;
-      await page.waitForTimeout(2000);
+
+      await page.waitForTimeout(1000);
       return result;
     }
+
     result.error = 'Não encontrei opção Subscreve e Poupe.';
     return result;
   } catch (err) {
@@ -765,16 +840,35 @@ async function selectSubscribeAndSaveOption(page) {
 }
 
 async function clickSubscribeNow(page) {
-  const result = { clicked: false, selector: '', error: '' };
+  const result = {
+    clicked: false,
+    selector: '',
+    error: '',
+  };
+
   try {
     for (const selector of SELECTORS.subscribeAndSave.submit) {
       const loc = page.locator(selector).first();
+
       if (!(await loc.count().catch(() => 0))) continue;
-      await loc.click({ timeout: 8000 });
+
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+
+      const childButton = loc.locator('button').first();
+
+      if (await childButton.count().catch(() => 0)) {
+        await childButton.click({ timeout: 8000, force: true });
+        result.clicked = true;
+        result.selector = `${selector} button`;
+        return result;
+      }
+
+      await loc.click({ timeout: 8000, force: true });
       result.clicked = true;
       result.selector = selector;
       return result;
     }
+
     result.error = 'Não encontrei botão de subscrever.';
     return result;
   } catch (err) {
@@ -824,16 +918,53 @@ async function simulateCheckout(page, product) {
 
     if (strategy.mode === 'sns_units') {
       result.snsSelection = await selectSubscribeAndSaveOption(page);
-      if (!result.snsSelection.selected) return { ...result, error: result.snsSelection.error || 'Falha ao selecionar Subscreve e Poupe.' };
+
+      if (!result.snsSelection.selected) {
+        return {
+          ...result,
+          error: result.snsSelection.error || 'Falha ao selecionar Subscreve e Poupe.',
+        };
+      }
+
       result.quantitySelection = await selectQuantity(page, strategy.quantity, 'sns');
-      if (strategy.quantity > 1 && !result.quantitySelection.selected) return { ...result, error: result.quantitySelection.error || 'Falha ao selecionar quantidade no Subscreve e Poupe.' };
+
+      if (strategy.quantity > 1 && !result.quantitySelection.selected) {
+        return {
+          ...result,
+          error: result.quantitySelection.error || 'Falha ao selecionar quantidade no Subscreve e Poupe.',
+        };
+      }
+
+      await page.waitForTimeout(1000);
+
       result.subscribeClick = await clickSubscribeNow(page);
-      if (!result.subscribeClick.clicked) return { ...result, error: result.subscribeClick.error || 'Falha ao clicar em Subscrever.' };
+
+      if (!result.subscribeClick.clicked) {
+        return {
+          ...result,
+          error: result.subscribeClick.error || 'Falha ao clicar em Subscrever.',
+        };
+      }
     } else if (strategy.mode === 'sns') {
       result.snsSelection = await selectSubscribeAndSaveOption(page);
-      if (!result.snsSelection.selected) return { ...result, error: result.snsSelection.error || 'Falha ao selecionar Subscreve e Poupe.' };
+
+      if (!result.snsSelection.selected) {
+        return {
+          ...result,
+          error: result.snsSelection.error || 'Falha ao selecionar Subscreve e Poupe.',
+        };
+      }
+
+      await page.waitForTimeout(1000);
+
       result.subscribeClick = await clickSubscribeNow(page);
-      if (!result.subscribeClick.clicked) return { ...result, error: result.subscribeClick.error || 'Falha ao clicar em Subscrever.' };
+
+      if (!result.subscribeClick.clicked) {
+        return {
+          ...result,
+          error: result.subscribeClick.error || 'Falha ao clicar em Subscrever.',
+        };
+      }
     } else {
       if (strategy.mode === 'normal_units') {
         result.quantitySelection = await selectQuantity(page, strategy.quantity, 'normal');
