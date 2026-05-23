@@ -252,6 +252,20 @@ function parsePriceNumber(text) {
   return Number.isFinite(n) ? n : null;
 }
 
+
+function multiplyPriceText(priceText, quantity) {
+  const n = parsePriceNumber(priceText);
+  const q = Number(quantity || 1);
+
+  if (!Number.isFinite(n) || !Number.isFinite(q) || q <= 1) {
+    return ensureEuro(priceText);
+  }
+
+  const total = n * q;
+
+  return `${total.toFixed(2).replace('.', ',')}€`;
+}
+
 function isSubscribeAndSaveCheaper(product) {
   const normal = parsePriceNumber(product.price);
   const sns = parsePriceNumber(product.snsPrice);
@@ -1569,6 +1583,15 @@ function getBestPrice(product) {
 function getPvp(product) {
   return formatPvp(product.pvp || product.price || '');
 }
+function getUnitsPvp(product) {
+  const quantity = Number(product.checkoutStrategy?.quantity || 1);
+  const basePvp = product.pvp || product.price || '';
+
+  if (!basePvp) return '⚠️ERRO';
+
+  return multiplyPriceText(basePvp, quantity);
+}
+
 
 function primePrefix(product) {
   return product.signals?.hasPrimeExclusive ? '𝙚𝙭𝙘𝙡𝙪𝙨𝙞𝙫𝙤 𝙥𝙧𝙞𝙢𝙚 + ' : '';
@@ -1669,7 +1692,7 @@ function formatUnitsCheckoutPublication(product, flags = {}) {
   const unitsCount = flags.unitsCount || product.checkoutStrategy?.quantity || '2';
   const unitsLabel = flags.unitsLabel || 'un';
   const price = getBestPrice(product) || 'XX,XX€';
-  const pvp = getPvp(product);
+  const pvp = getUnitsPvp(product);
   const lines = basePublicationLines(product, flags);
 
   lines.push(`${unitsCount} ${unitsLabel} 💥 ${price} ${label} (pvp ${pvp})`);
