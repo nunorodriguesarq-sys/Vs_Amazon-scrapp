@@ -1203,6 +1203,89 @@ async function getCurrentQuantityValue(page) {
   return '';
 }
 
+
+async function getCurrentSubscribeAndSaveQuantityValue(page) {
+  const candidates = [
+    '#a-autoid-3-announce',
+    '#snsAccordionRowMiddle span.a-dropdown-prompt',
+    '#snsAccordionRow span.a-dropdown-prompt',
+    '#rcx-subscribe-submit-button-announce',
+    'span.a-dropdown-prompt',
+  ];
+
+  for (const selector of candidates) {
+    const texts = await allTexts(page, selector, 10).catch(() => []);
+
+    for (const text of texts) {
+      const match = cleanSpaces(text).match(/(?:Quantidade|Cantidad)?\s*:?\s*(\d+)/i);
+      if (match?.[1]) return match[1];
+    }
+  }
+
+  const select = page.locator('#quantity, select#quantity, select[name="quantity"]').first();
+
+  if (await select.count().catch(() => 0)) {
+    const value = await select.inputValue().catch(() => '');
+    if (value) return value;
+  }
+
+  return '';
+}
+
+async function clickDropdownOptionAndVerify(page, optionLocator, value) {
+  const result = {
+    clicked: false,
+    method: '',
+    selectedValue: '',
+    error: '',
+  };
+
+  await optionLocator.scrollIntoViewIfNeeded().catch(() => {});
+  await page.waitForTimeout(300);
+
+  const attempts = [
+    {
+      name: 'normal-click',
+      fn: async () => optionLocator.click({ timeout: 5000 }),
+    },
+    {
+      name: 'mouse-center-click',
+      fn: async () => {
+        const box = await optionLocator.boundingBox();
+        if (!box) throw new Error('Sem boundingBox na opção');
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.waitForTimeout(100);
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { delay: 80 });
+      },
+    },
+    {
+      name: 'force-click',
+      fn: async () => optionLocator.click({ timeout: 5000, force: true }),
+    },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      await attempt.fn();
+      await page.waitForTimeout(1200);
+
+      const selectedValue = await getCurrentSubscribeAndSaveQuantityValue(page);
+      result.selectedValue = selectedValue || '';
+
+      if (selectedValue === value) {
+        result.clicked = true;
+        result.method = attempt.name;
+        return result;
+      }
+
+      result.error = `Clique ${attempt.name} executado, mas selectedValue=${selectedValue || 'vazio'} em vez de ${value}.`;
+    } catch (err) {
+      result.error = `${attempt.name}: ${err?.message || String(err)}`;
+    }
+  }
+
+  return result;
+}
 async function clickLocatorRobust(locator, meta = {}) {
   const result = {
     clicked: false,
@@ -1331,16 +1414,28 @@ async function selectSubscribeAndSaveQuantity(page, quantity) {
             selector: `#rcxsubsQuan_${optionIndex} span`,
           },
           {
+            locator: page.locator(`li#rcxsubsQuan_${optionIndex} a`),
+            selector: `li#rcxsubsQuan_${optionIndex} a`,
+          },
+          {
             locator: page.locator(`a[data-value='{"stringVal":"${value}"}']`),
             selector: `a[data-value='{"stringVal":"${value}"}']`,
           },
           {
-            locator: page.getByRole('option', { name: value, exact: true }),
-            selector: `role=option[name="${value}"]`,
+            locator: page.locator(`.a-popover a[data-value*='"${value}"']`),
+            selector: `.a-popover a[data-value*='"${value}"']`,
+          },
+          {
+            locator: page.locator(`.a-popover li:has-text("${value}")`),
+            selector: `.a-popover li:has-text("${value}")`,
           },
           {
             locator: page.locator(`.a-popover a:has-text("${value}")`),
             selector: `.a-popover a:has-text("${value}")`,
+          },
+          {
+            locator: page.getByRole('option', { name: value, exact: true }),
+            selector: `role=option[name="${value}"]`,
           },
         ];
 
@@ -1349,25 +1444,41 @@ async function selectSubscribeAndSaveQuantity(page, quantity) {
 
           if (!(await opt.count().catch(() => 0))) continue;
 
-          const clickResult = await clickLocatorRobust(opt, {
-            selector: itemOption.selector,
-          });
+          const clickResult = await clickDropdownOptionAndVerify(page, opt, value);
           if (!clickResult.clicked) {
             result.error = clickResult.error || `Falha ao clicar na opção ${itemOption.selector}`;
+            const reopen = await clickLocatorRobust(dropdown, {
+              selector: item.selector,
+            });
+            if (reopen.clicked) {
+              result.dropdownClickMethod = `${result.dropdownClickMethod}|reopen:${reopen.method}`;
+              await page.waitForTimeout(500);
+            }
             continue;
           }
           result.optionSelector = itemOption.selector;
           result.optionClickMethod = clickResult.method;
-          await page.waitForTimeout(1500);
 
-          const selectedValue = await getCurrentQuantityValue(page);
-          result.selectedValue = selectedValue || value;
+          const selectedValue = await getCurrentSubscribeAndSaveQuantityValue(page);
+          result.selectedValue = selectedValue || '';
 
-          if (clickResult.clicked) {
+          if (selectedValue === value) {
             result.selected = true;
-            result.selectedValue = selectedValue || value;
+            result.selectedValue = selectedValue;
             return result;
           }
+
+          result.selected = false;
+          result.error = `Clique na opção ${value} executado, mas a quantidade selecionada continuou ${selectedValue || 'desconhecida'}.`;
+
+          const reopen = await clickLocatorRobust(dropdown, {
+            selector: item.selector,
+          });
+          if (reopen.clicked) {
+            result.dropdownClickMethod = `${result.dropdownClickMethod}|reopen:${reopen.method}`;
+            await page.waitForTimeout(500);
+          }
+          continue;
         }
       }
     }
