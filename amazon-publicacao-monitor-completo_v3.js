@@ -1750,6 +1750,12 @@ async function simulateCheckout(page, product, options = {}) {
     if (product.manualInput?.manualCouponCode) {
       result.couponCodeApply = await applyCouponCodeAtCheckout(page, product.manualInput.manualCouponCode);
 
+      if (product.manualInput?.manualCouponCode && !result.couponCodeApply?.submitted) {
+        result.error = result.couponCodeApply?.error || 'Cupão manual aplicado/preenchido, mas não foi possível confirmar o botão "Utilizar esta forma de pagamento".';
+        result.reachedCheckoutSummary = false;
+        return result;
+      }
+
       if (result.couponCodeApply?.submitted) {
         await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
         await page.waitForTimeout(2000);
@@ -2154,6 +2160,30 @@ async function isCheckoutSummaryPage(page) {
   return hasTotals;
 }
 
+async function isCheckoutSummaryPageStrictAfterCoupon(page) {
+  const url = page.url();
+
+  const finalOrderButtonVisible =
+    await page.locator(NEVER_CLICK_SELECTORS.join(',')).count().catch(() => 0);
+
+  const finalOrderTextVisible =
+    await page.getByText(/Faça o seu pedido|Realizar pedido|Finalizar compra|Place your order/i)
+      .count()
+      .catch(() => 0);
+
+  // Se continua em /pay, só é resumo estrito se houver botão/texto final real.
+  // Não aceitar apenas totais laterais.
+  if (url.includes('/checkout/') && url.includes('/pay')) {
+    return Boolean(finalOrderButtonVisible || finalOrderTextVisible);
+  }
+
+  if (url.includes('/checkout/') && !url.includes('/pay')) {
+    return true;
+  }
+
+  return Boolean(finalOrderButtonVisible || finalOrderTextVisible);
+}
+
 async function clickConfirmedBottomContinueButton(page) {
   const result = {
     clicked: false,
@@ -2229,7 +2259,7 @@ async function clickConfirmedBottomContinueButton(page) {
     result.afterUrl = page.url();
     result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
     result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
-    result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+    result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
 
     return result;
   } catch (err) {
@@ -2635,14 +2665,13 @@ async function clickBottomContinueAfterCouponMessage(page) {
     result.afterUrl = page.url();
     result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
     result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
-    result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+    result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
 
-    // Importante:
-    // Neste fluxo NÃO validar sucesso apenas com hasCheckoutTotalsAfterContinue,
-    // porque os totais já aparecem antes na lateral.
+    // Neste fluxo, hasCheckoutTotalsAfterContinue é apenas debug.
+    // Não pode validar sucesso.
     if (!result.couponPanelClosedAfterContinue && !result.reachedSummaryAfterClick) {
       result.clicked = false;
-      result.error = `Clique executado no botão de baixo por ${result.method}, mas o painel do cupão não fechou.`;
+      result.error = `Clique executado no botão de baixo por ${result.method}, mas o painel do cupão não fechou nem apareceu resumo final estrito.`;
       return result;
     }
 
@@ -2860,7 +2889,7 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
       return result;
     }
 
-    result.error = continueResult.error || 'Falha ao clicar no botão de baixo depois da mensagem do cupão.';
+    result.error = continueResult.error || 'O cupão foi aplicado, mas o botão de baixo "Utilizar esta forma de pagamento" não fechou o painel do cupão.';
     return result;
 
 
