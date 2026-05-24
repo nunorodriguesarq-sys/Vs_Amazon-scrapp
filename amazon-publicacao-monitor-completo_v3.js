@@ -1806,7 +1806,14 @@ function interpretCouponMessage(text) {
     lower.includes('poupanças') ||
     lower.includes('ahorros') ||
     lower.includes('cupons da amazon') ||
-    lower.includes('cupones de amazon')
+    lower.includes('cupones de amazon') ||
+    lower.includes('resgatou') ||
+    lower.includes('resgatado') ||
+    lower.includes('resgatada') ||
+    lower.includes('sucesso') ||
+    lower.includes('com sucesso') ||
+    lower.includes('código promocional com sucesso') ||
+    lower.includes('codigo promocional com sucesso')
   ) {
     return 'accepted';
   }
@@ -1956,6 +1963,13 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
           lower.includes('ahorros') ||
           lower.includes('cupons da amazon') ||
           lower.includes('cupones de amazon') ||
+          lower.includes('resgatou') ||
+          lower.includes('resgatado') ||
+          lower.includes('resgatada') ||
+          lower.includes('sucesso') ||
+          lower.includes('com sucesso') ||
+          lower.includes('código promocional com sucesso') ||
+          lower.includes('codigo promocional com sucesso') ||
           lower.includes('promoção') ||
           lower.includes('promoción') ||
           lower.includes('não é aplicável') ||
