@@ -1660,6 +1660,7 @@ async function simulateCheckout(page, product, options = {}) {
       if (result.couponCodeApply?.submitted) {
         await page.waitForTimeout(2000);
         result.afterCouponReturnUrl = page.url();
+        result.afterCouponReachedSummary = await isCheckoutSummaryPage(page);
       }
     }
 
@@ -1854,15 +1855,64 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
   };
 }
 
+async function isCheckoutSummaryPage(page) {
+  const url = page.url();
+
+  if (url.includes('/checkout/') && !url.includes('/pay')) {
+    return true;
+  }
+
+  const summarySelectors = [
+    '[data-shimmer-target="ordertotals-amount"]',
+    '.order-summary-line-definition [data-shimmer-target="ordertotals-amount"]',
+    '#subtotals-marketplace-table [data-shimmer-target="ordertotals-amount"]',
+    'text=/Total do pedido/i',
+    'text=/Total del pedido/i',
+    'text=/Faça o seu pedido/i',
+    'text=/Realizar pedido/i',
+  ];
+
+  for (const selector of summarySelectors) {
+    const count = await page.locator(selector).count().catch(() => 0);
+    if (count > 0) return true;
+  }
+
+  return false;
+}
+
 async function clickUseThisPaymentMethod(page) {
   const result = {
     clicked: false,
     selector: '',
     method: '',
+    beforeUrl: page.url(),
+    afterUrl: '',
+    reachedSummaryAfterClick: false,
+    attempts: [],
     error: '',
   };
 
   const candidates = [
+    {
+      locator: page.getByTestId('bottom-continue-button'),
+      selector: 'testid=bottom-continue-button',
+    },
+    {
+      locator: page.locator('[data-testid="bottom-continue-button"]'),
+      selector: '[data-testid="bottom-continue-button"]',
+    },
+    {
+      locator: page.getByRole('button', { name: /Utilizar esta forma de pagamento/i }),
+      selector: 'role=button[name~/Utilizar esta forma de pagamento/i]',
+    },
+    {
+      locator: page.locator('button:has-text("Utilizar esta forma de pagamento")'),
+      selector: 'button:has-text("Utilizar esta forma de pagamento")',
+    },
+    {
+      locator: page.getByText(/Utilizar esta forma de pagamento/i),
+      selector: 'text=/Utilizar esta forma de pagamento/i',
+    },
     {
       locator: page.getByTestId('secondary-continue-button'),
       selector: 'testid=secondary-continue-button',
@@ -1884,14 +1934,6 @@ async function clickUseThisPaymentMethod(page) {
       selector: '#checkout-secondary-continue-button-id-announce',
     },
     {
-      locator: page.getByRole('button', { name: /Utilizar esta forma de pagamento/i }),
-      selector: 'role=button[name~/Utilizar esta forma de pagamento/i]',
-    },
-    {
-      locator: page.getByText(/Utilizar esta forma de pagamento/i),
-      selector: 'text=/Utilizar esta forma de pagamento/i',
-    },
-    {
       locator: page.getByRole('button', { name: /Usar este método de pago/i }),
       selector: 'role=button[name~/Usar este método de pago/i]',
     },
@@ -1899,41 +1941,62 @@ async function clickUseThisPaymentMethod(page) {
       locator: page.getByText(/Usar este método de pago/i),
       selector: 'text=/Usar este método de pago/i',
     },
-    {
-      locator: page.getByTestId('bottom-continue-button'),
-      selector: 'testid=bottom-continue-button',
-    },
-    {
-      locator: page.locator('[data-testid="bottom-continue-button"]'),
-      selector: '[data-testid="bottom-continue-button"]',
-    },
   ];
 
-  const button = await waitForFirstAvailableLocator(page, candidates, 10000);
+  for (const item of candidates) {
+    const count = await item.locator.count().catch(() => 0);
+    if (!count) continue;
 
-  if (!button) {
-    result.error = 'Não encontrei o botão "Utilizar esta forma de pagamento".';
-    return result;
+    for (let i = 0; i < count; i++) {
+      const loc = item.locator.nth(i);
+      const visible = await loc.isVisible().catch(() => false);
+      if (!visible) continue;
+
+      const attempt = {
+        selector: item.selector,
+        clicked: false,
+        method: '',
+        beforeUrl: page.url(),
+        afterUrl: '',
+        reachedSummaryAfterClick: false,
+        error: '',
+      };
+
+      const clickResult = await clickLocatorRobust(loc, {
+        selector: item.selector,
+      });
+
+      attempt.clicked = clickResult.clicked;
+      attempt.method = clickResult.method || '';
+      attempt.error = clickResult.error || '';
+
+      if (!clickResult.clicked) {
+        result.attempts.push(attempt);
+        continue;
+      }
+
+      await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(3000);
+
+      attempt.afterUrl = page.url();
+      attempt.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+
+      result.attempts.push(attempt);
+
+      if (attempt.reachedSummaryAfterClick || !attempt.afterUrl.includes('/pay')) {
+        result.clicked = true;
+        result.selector = item.selector;
+        result.method = clickResult.method;
+        result.afterUrl = attempt.afterUrl;
+        result.reachedSummaryAfterClick = attempt.reachedSummaryAfterClick;
+        return result;
+      }
+    }
   }
 
-  const clickResult = await clickLocatorRobust(button.locator, {
-    selector: button.selector,
-  });
-
-  if (!clickResult.clicked) {
-    result.error = clickResult.error || `Falha ao clicar em ${button.selector}`;
-    result.selector = button.selector;
-    return result;
-  }
-
-  result.clicked = true;
-  result.selector = button.selector;
-  result.method = clickResult.method;
-
-  await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(3000);
-
+  result.afterUrl = page.url();
+  result.error = 'Cliquei/tentei os botões de continuar, mas não consegui sair da etapa de pagamento para o resumo.';
   return result;
 }
 
@@ -2132,6 +2195,8 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
       result.continuedAfterCouponMessage = true;
       result.buttonSelector = continueResult.selector;
       result.method = continueResult.method;
+      result.afterContinueUrl = continueResult.afterUrl;
+      result.reachedSummaryAfterContinue = continueResult.reachedSummaryAfterClick;
       return result;
     }
 
