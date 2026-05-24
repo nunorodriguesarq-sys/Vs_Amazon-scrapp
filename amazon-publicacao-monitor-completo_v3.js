@@ -515,21 +515,93 @@ function detectCouponCode(text) {
   const clean = cleanSpaces(text);
 
   const patterns = [
-    /c[oó]digo\s*(?:promocional|cup[oó]n|descuento)?\s*[:：]?\s*([A-Z0-9]{4,20})/i,
-    /cup[oó]n\s*[:：]?\s*([A-Z0-9]{4,20})/i,
+    // Formatos explícitos e seguros
+    /cup[aã]o\s*[:：]\s*([A-Z0-9]{4,20})/i,
+    /cup[oó]n\s*[:：]\s*([A-Z0-9]{4,20})/i,
+    /cupom\s*[:：]\s*([A-Z0-9]{4,20})/i,
+
+    /c[oó]digo\s*[:：]\s*([A-Z0-9]{4,20})/i,
+    /codigo\s*[:：]\s*([A-Z0-9]{4,20})/i,
+
+    /introduz[ae]?\s+o\s+c[oó]digo\s+([A-Z0-9]{4,20})/i,
     /introduce\s+el\s+c[oó]digo\s+([A-Z0-9]{4,20})/i,
+    /introduzca\s+el\s+c[oó]digo\s+([A-Z0-9]{4,20})/i,
+
+    /usa\s+o\s+c[oó]digo\s+([A-Z0-9]{4,20})/i,
     /usa\s+el\s+c[oó]digo\s+([A-Z0-9]{4,20})/i,
     /usar\s+c[oó]digo\s+([A-Z0-9]{4,20})/i,
+
+    /aplicar\s+c[oó]digo\s+([A-Z0-9]{4,20})/i,
+    /aplica\s+el\s+c[oó]digo\s+([A-Z0-9]{4,20})/i,
   ];
 
   for (const re of patterns) {
     const match = clean.match(re);
-    if (match?.[1]) {
-      const code = match[1].replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      if (code.length >= 4 && !['AMAZON', 'PRIME', 'CUPON'].includes(code)) return code;
+    if (!match?.[1]) continue;
+
+    const code = match[1].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+
+    if (isValidCouponCodeCandidate(code)) {
+      return code;
     }
   }
+
   return '';
+}
+
+const FALSE_COUPON_CODES = new Set([
+  'AMAZON',
+  'PRIME',
+  'CUPON',
+  'CUPÓN',
+  'CUPAO',
+  'CUPÃO',
+  'CUPOM',
+  'EXCLUSIVO',
+  'EXCLUSIVA',
+  'EXCLUSIVE',
+  'PROMOCIONAL',
+  'PROMOCION',
+  'PROMOCIÓN',
+  'PROMOCAO',
+  'PROMOÇÃO',
+  'PROMOTION',
+  'DESCONTO',
+  'DESCUENTO',
+  'OFERTA',
+  'FLASH',
+  'SALE',
+  'AHORRA',
+  'POUPE',
+  'VIDEO',
+  'VÍDEO',
+  'PORTATIL',
+  'PORTÁTIL',
+  'CARGADOR',
+  'CARREGADOR',
+]);
+
+function isValidCouponCodeCandidate(code) {
+  const clean = String(code || '')
+    .replace(/[^A-Z0-9]/gi, '')
+    .toUpperCase();
+
+  if (!clean) return false;
+  if (clean.length < 4 || clean.length > 20) return false;
+  if (FALSE_COUPON_CODES.has(clean)) return false;
+
+  // Evitar palavras comuns sem números.
+  // A maioria dos cupões reais costuma ter mistura de letras/números ou formato específico.
+  const hasNumber = /\d/.test(clean);
+  const hasLetter = /[A-Z]/.test(clean);
+
+  if (!hasNumber && hasLetter) {
+    // Só aceitar códigos só com letras se forem claramente longos e não estiverem na blacklist.
+    // Mesmo assim, bloquear palavras genéricas através da blacklist acima.
+    if (clean.length < 6) return false;
+  }
+
+  return true;
 }
 
 function detectAppliedCouponText(text) {
@@ -672,21 +744,23 @@ function detectPromotionKind({
   hasCouponCodeOnlyAtCheckout,
   couponCode,
 }) {
+  const validCouponCode = isValidCouponCodeCandidate(couponCode);
+
   if (hasUnitsPromotion) return 'units';
 
   if (useSubscribeAndSave && hasApplyCoupon && hasCheckoutDiscount) return 'apply+sns+checkout';
   if (useSubscribeAndSave && hasCheckoutDiscount) return 'sns+checkout';
   if (useSubscribeAndSave && hasApplyCoupon) return 'apply+sns';
-  if (useSubscribeAndSave && couponCode) return 'sns+coupon';
+  if (useSubscribeAndSave && validCouponCode) return 'sns+coupon';
   if (useSubscribeAndSave) return 'sns';
 
   if (hasAppliedCoupon || hasCouponCheckboxDom) return 'apply';
-  if (hasApplyCoupon && couponCode) return 'apply+coupon';
+  if (hasApplyCoupon && validCouponCode) return 'apply+coupon';
   if (hasApplyCoupon && hasCheckoutDiscount) return 'apply+checkout';
   if (hasApplyCoupon) return 'apply';
 
   if (hasCheckoutDiscount) return 'checkout';
-  if (couponCode || hasCouponCodeOnlyAtCheckout) return 'coupon';
+  if (validCouponCode) return 'coupon';
   if (hasFlashSale) return 'flash';
 
   return 'normal';
