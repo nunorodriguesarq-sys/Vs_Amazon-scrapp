@@ -3093,10 +3093,10 @@ function formatUnitsCheckoutPublication(product, flags = {}) {
   const note = subscriptionNoteIfNeeded(label);
   if (note) lines.push(note);
 
-  const moreLabel = detectUnitsPromoLabel(product);
-  if (moreLabel) {
-    lines.push(`${moreLabel} ${product.affiliateUrl}`);
-  }
+  // Antes adicionava uma linha "𝗠𝗔𝗜𝗦 𝗣𝗥𝗢𝗗𝗨𝗧𝗢𝗦..."
+  // Nas publicações com mais do que 1 unidade, essa linha deve ser removida.
+  // Mantemos apenas uma linha em branco antes da linha de categorias.
+  lines.push('');
 
   lines.push(categoryLine(product));
   return lines.join('\n');
