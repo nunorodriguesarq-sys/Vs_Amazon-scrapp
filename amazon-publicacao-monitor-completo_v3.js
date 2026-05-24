@@ -1880,22 +1880,91 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
 }
 
 async function isCouponPanelClosedAfterContinue(page) {
-  const inputCount = await page.getByTestId('input-claim-code-text-input').count().catch(() => 0);
-  const inputVisible = inputCount > 0
-    ? await page.getByTestId('input-claim-code-text-input').first().isVisible().catch(() => false)
-    : false;
+  const inputVisible = await page.getByTestId('input-claim-code-text-input')
+    .first()
+    .isVisible()
+    .catch(() => false);
 
-  const pressableCount = await page.getByTestId('input-claim-code-pressable').count().catch(() => 0);
-  const pressableVisible = pressableCount > 0
-    ? await page.getByTestId('input-claim-code-pressable').first().isVisible().catch(() => false)
-    : false;
+  const pressableVisible = await page.getByTestId('input-claim-code-pressable')
+    .first()
+    .isVisible()
+    .catch(() => false);
 
-  if (!inputVisible && !pressableVisible) return true;
+  const insertCodeVisible = await page.getByText(/Inserir código|Introduzir código|Introducir código/i)
+    .first()
+    .isVisible()
+    .catch(() => false);
 
-  const activeElementTag = await page.evaluate(() => document.activeElement?.tagName || '').catch(() => '');
-  if (!inputVisible && String(activeElementTag).toLowerCase() !== 'input') return true;
+  if (!inputVisible && !pressableVisible && !insertCodeVisible) {
+    return true;
+  }
 
   return false;
+}
+
+async function clickContinuePaymentButton(page, locator, selector) {
+  const result = {
+    clicked: false,
+    selector,
+    method: '',
+    error: '',
+  };
+
+  try {
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(500);
+
+    try {
+      await locator.click({ timeout: 5000 });
+      result.clicked = true;
+      result.method = 'normal-click';
+      return result;
+    } catch (err1) {
+      result.error = err1?.message || String(err1);
+    }
+
+    try {
+      await locator.click({ timeout: 5000, force: true });
+      result.clicked = true;
+      result.method = 'force-click';
+      return result;
+    } catch (err2) {
+      result.error = `${result.error} | force: ${err2?.message || String(err2)}`;
+    }
+
+    try {
+      const ok = await locator.evaluate((el) => {
+        if (!el) return false;
+        el.click();
+        return true;
+      });
+
+      if (ok) {
+        result.clicked = true;
+        result.method = 'js-click';
+        return result;
+      }
+    } catch (err3) {
+      result.error = `${result.error} | js: ${err3?.message || String(err3)}`;
+    }
+
+    try {
+      const box = await locator.boundingBox();
+      if (box) {
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        result.clicked = true;
+        result.method = 'mouse-click';
+        return result;
+      }
+    } catch (err4) {
+      result.error = `${result.error} | mouse: ${err4?.message || String(err4)}`;
+    }
+
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
 }
 
 async function hasCheckoutTotalsVisible(page) {
@@ -1971,6 +2040,22 @@ async function clickBottomContinueButton(page) {
 
   const candidates = [
     {
+      locator: page.locator('#checkout-primary-continue-button-id > span > input'),
+      selector: '#checkout-primary-continue-button-id > span > input',
+    },
+    {
+      locator: page.locator('#checkout-primary-continue-button-id input'),
+      selector: '#checkout-primary-continue-button-id input',
+    },
+    {
+      locator: page.locator('#checkout-primary-continue-button-id'),
+      selector: '#checkout-primary-continue-button-id',
+    },
+    {
+      locator: page.locator('#checkout-primary-continue-button-id-announce'),
+      selector: '#checkout-primary-continue-button-id-announce',
+    },
+    {
       locator: page.getByTestId('bottom-continue-button'),
       selector: 'testid=bottom-continue-button',
     },
@@ -2007,36 +2092,7 @@ async function clickBottomContinueButton(page) {
       await loc.scrollIntoViewIfNeeded().catch(() => {});
       await page.waitForTimeout(500);
 
-      let clickResult = { clicked: false, method: '', error: '' };
-
-      await loc.scrollIntoViewIfNeeded().catch(() => {});
-      await page.waitForTimeout(200);
-
-      clickResult = await clickLocatorRobust(loc, {
-        selector: item.selector,
-        methods: ['click'],
-      });
-
-      if (!clickResult.clicked) {
-        clickResult = await clickLocatorRobust(loc, {
-          selector: item.selector,
-          methods: ['force'],
-        });
-      }
-
-      if (!clickResult.clicked) {
-        clickResult = await clickLocatorRobust(loc, {
-          selector: item.selector,
-          methods: ['coords'],
-        });
-      }
-
-      if (!clickResult.clicked) {
-        clickResult = await clickLocatorRobust(loc, {
-          selector: item.selector,
-          methods: ['enter'],
-        });
-      }
+      const clickResult = await clickContinuePaymentButton(page, loc, item.selector);
 
       if (clickResult.clicked) {
         result.clicked = true;
@@ -2055,10 +2111,18 @@ async function clickBottomContinueButton(page) {
         result.couponPanelClosedAfterContinue = panelClosed;
         result.hasCheckoutTotalsAfterContinue = hasTotals;
 
-        if (result.reachedSummaryAfterClick || panelClosed || hasTotals) {
+        if (panelClosed || result.reachedSummaryAfterClick) {
           result.clicked = true;
           return result;
         }
+
+        if (hasTotals && item.selector.includes('checkout-primary-continue-button-id')) {
+          result.clicked = true;
+          return result;
+        }
+
+        result.clicked = false;
+        result.error = `Clique em ${item.selector} executado por ${clickResult.method}, mas o painel do cupão não fechou.`;
       }
 
       result.error = clickResult.error || `Falha ao clicar em ${item.selector}`;
@@ -2101,9 +2165,9 @@ async function clickUseThisPaymentMethod(page) {
   const bottomSucceeded =
     bottomClick.clicked &&
     (
-      bottomClick.reachedSummaryAfterClick ||
       bottomClick.couponPanelClosedAfterContinue ||
-      bottomClick.hasCheckoutTotalsAfterContinue
+      bottomClick.reachedSummaryAfterClick ||
+      bottomClick.selector.includes('checkout-primary-continue-button-id')
     );
 
   if (bottomSucceeded) {
