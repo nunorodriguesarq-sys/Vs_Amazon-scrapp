@@ -100,6 +100,11 @@ const SELECTORS = {
     '#dealBadgeSupportingText > span',
   ],
 
+  checkoutDiscountMessage: [
+    '#promoPriceBlockMessage_feature_div > div > span > div:nth-child(2) > span > div > div > div',
+    '#promoPriceBlockMessage_feature_div',
+  ],
+
   category: '.pg-cat',
   subcategory: '.pg-subcat',
 
@@ -453,6 +458,8 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
   const subcategoryRaw = await safeText(page, SELECTORS.subcategory);
 
   const bodyText = await safeText(page, 'body');
+  const checkoutDiscountMessage = await firstText(page, SELECTORS.checkoutDiscountMessage);
+  const combinedTextForSignals = `${bodyText} ${checkoutDiscountMessage}`;
   const hasCouponCheckboxDom = await page.locator([
     'input[id^="checkmarkpctch"]',
     '[id^="checkmarkpctch"]',
@@ -464,7 +471,14 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
   ].join(',')).count().catch(() => 0) > 0;
 
   const couponCode = productInput.manualCouponCode || '';
-  const signals = detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp });
+  const signals = detectSignals({
+    bodyText: combinedTextForSignals,
+    primeText,
+    primeDayText,
+    price,
+    snsPrice,
+    pvp,
+  });
   if (productInput.manualCouponCode) {
     signals.hasManualCouponCode = true;
     signals.hasCouponCodeOnlyAtCheckout = true;
@@ -495,6 +509,7 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
     price,
     snsPrice,
     pvp,
+    checkoutDiscountMessage,
     bullets,
     breadcrumbs,
     category: hashtagify(categoryRaw, 'categoria'),
@@ -690,10 +705,11 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
     'en la compra de artículos seleccionados',
     'en la compra de productos seleccionados',
     'comprar artículos elegibles',
-  ]) || /poup(?:ar|e)\s+[\d,.]+\s*€?.{0,80}(?:ao|a)\s+finalizar\s+(?:a\s+)?compra/i.test(text)
-    || /ahorr(?:a|ar)\s+[\d,.]+\s*€?.{0,80}al\s+finalizar\s+la\s+compra/i.test(text)
-    || /poup(?:ar|e).{0,80}finalizar\s+(?:a\s+)?compra/i.test(text)
-    || /ahorr(?:a|ar).{0,80}finalizar\s+la\s+compra/i.test(text);
+  ]) ||
+/poup(?:ar|e)\s+[\d,.]+\s*(?:€|%)?.{0,120}ao\s+finalizar\s+(?:a\s+)?compra/i.test(text) ||
+/ahorr(?:a|ar)\s+[\d,.]+\s*(?:€|%)?.{0,120}al\s+finalizar\s+la\s+compra/i.test(text) ||
+/poup(?:ar|e).{0,120}finalizar\s+(?:a\s+)?compra/i.test(text) ||
+/ahorr(?:a|ar).{0,120}finalizar\s+la\s+compra/i.test(text);
 
   const hasFlashSale = includesAny(text, [
     'Oferta flash',
@@ -2698,6 +2714,7 @@ function subscriptionNoteIfNeeded(label) {
 
 function detectDiscountLabel(product) {
   const s = product.signals || {};
+
   if (product.manualInput?.manualCouponCode && product.promotionKind === 'apply+coupon') {
     return 'aplicar desconto + cupão:';
   }
@@ -2714,20 +2731,31 @@ function detectDiscountLabel(product) {
     return LABEL_APPLY_SNS_CHECKOUT;
   }
 
+  if (product.promotionKind === 'apply+checkout') {
+    return 'aplicar desconto + desconto no checkout';
+  }
+
   if (s.useSubscribeAndSave && s.hasApplyCoupon) {
     return s.hasCheckoutDiscount
       ? LABEL_APPLY_SNS_CHECKOUT
       : LABEL_APPLY_SNS;
   }
 
-  if (s.hasAppliedCoupon) return LABEL_APPLY_DISCOUNT;
   if (s.useSubscribeAndSave && product.couponCode) return `${LABEL_SNS} + cupão:`;
   if (s.useSubscribeAndSave && s.hasCheckoutDiscount) return LABEL_SNS_CHECKOUT;
   if (s.useSubscribeAndSave) return LABEL_SNS;
+
+  // Esta condição tem de vir ANTES de hasAppliedCoupon.
+  if (s.hasApplyCoupon && s.hasCheckoutDiscount) {
+    return 'aplicar desconto + desconto no checkout';
+  }
+
   if (s.hasApplyCoupon && product.couponCode) return 'aplicar desconto + cupão:';
-  if (s.hasApplyCoupon && s.hasCheckoutDiscount) return 'aplicar desconto + desconto no checkout';
+
+  // Só devolver aplicar desconto simples se NÃO existir desconto no checkout.
+  if (s.hasAppliedCoupon || s.hasApplyCoupon) return LABEL_APPLY_DISCOUNT;
+
   if (s.hasCheckoutDiscount) return LABEL_CHECKOUT_DISCOUNT;
-  if (s.hasApplyCoupon) return LABEL_APPLY_DISCOUNT;
   if (product.couponCode) return 'cupão:';
   if (s.hasFlashSale) return LABEL_FLASH_SALE;
 
