@@ -459,6 +459,8 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
 
   const bodyText = await safeText(page, 'body');
   const checkoutDiscountMessage = await firstText(page, SELECTORS.checkoutDiscountMessage);
+  const checkoutDiscountMessageIsGenericEligible =
+    isGenericEligibleItemsMessage(checkoutDiscountMessage);
   const combinedTextForSignals = `${bodyText} ${checkoutDiscountMessage}`;
   const hasCouponCheckboxDom = await page.locator([
     'input[id^="checkmarkpctch"]',
@@ -479,6 +481,9 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
     snsPrice,
     pvp,
   });
+  if (checkoutDiscountMessageIsGenericEligible && !/finalizar|checkout|tramitar|concluir/i.test(checkoutDiscountMessage)) {
+    signals.hasCheckoutDiscount = false;
+  }
   if (productInput.manualCouponCode) {
     signals.hasManualCouponCode = true;
     signals.hasCouponCodeOnlyAtCheckout = true;
@@ -510,6 +515,7 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
     snsPrice,
     pvp,
     checkoutDiscountMessage,
+    checkoutDiscountMessageIsGenericEligible,
     bullets,
     breadcrumbs,
     category: hashtagify(categoryRaw, 'categoria'),
@@ -675,6 +681,22 @@ function hasRealCouponCheckboxText(text) {
   );
 }
 
+function isGenericEligibleItemsMessage(text) {
+  const clean = cleanSpaces(text).toLowerCase();
+
+  return (
+    clean.includes('comprar artigos elegíveis') ||
+    clean.includes('comprar articulos elegibles') ||
+    clean.includes('comprar artículos elegibles') ||
+    clean.includes('artigos elegíveis') ||
+    clean.includes('artículos elegibles') ||
+    clean.includes('en la compra de artículos seleccionados') ||
+    clean.includes('en la compra de productos seleccionados') ||
+    /poup(?:ar|e)\s+\d+\s*%\s+em\s+\d+\s+ou\s+mais/i.test(clean) ||
+    /ahorr(?:a|ar)\s+\d+\s*%\s+en\s+\d+\s+o\s+m[aá]s/i.test(clean)
+  );
+}
+
 function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp }) {
   const text = cleanSpaces(bodyText);
 
@@ -702,9 +724,6 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
     'ao tramitar o pedido',
     'al finalizar la compra',
     'al tramitar el pedido',
-    'en la compra de artículos seleccionados',
-    'en la compra de productos seleccionados',
-    'comprar artículos elegibles',
   ]) ||
 /poup(?:ar|e)\s+[\d,.]+\s*(?:€|%)?.{0,120}ao\s+finalizar\s+(?:a\s+)?compra/i.test(text) ||
 /ahorr(?:a|ar)\s+[\d,.]+\s*(?:€|%)?.{0,120}al\s+finalizar\s+la\s+compra/i.test(text) ||
