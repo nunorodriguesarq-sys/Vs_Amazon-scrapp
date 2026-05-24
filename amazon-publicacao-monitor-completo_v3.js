@@ -1880,6 +1880,82 @@ async function isCheckoutSummaryPage(page) {
   return false;
 }
 
+
+async function clickBottomContinueButton(page) {
+  const result = {
+    clicked: false,
+    selector: '',
+    method: '',
+    beforeUrl: page.url(),
+    afterUrl: '',
+    error: '',
+  };
+
+  const candidates = [
+    {
+      locator: page.getByTestId('bottom-continue-button'),
+      selector: 'testid=bottom-continue-button',
+    },
+    {
+      locator: page.locator('[data-testid="bottom-continue-button"]'),
+      selector: '[data-testid="bottom-continue-button"]',
+    },
+    {
+      locator: page.locator('button[data-testid="bottom-continue-button"]'),
+      selector: 'button[data-testid="bottom-continue-button"]',
+    },
+    {
+      locator: page.locator('button:has-text("Utilizar esta forma de pagamento")'),
+      selector: 'button:has-text("Utilizar esta forma de pagamento")',
+    },
+    {
+      locator: page.getByRole('button', { name: /Utilizar esta forma de pagamento/i }),
+      selector: 'role=button[name~/Utilizar esta forma de pagamento/i]',
+    },
+  ];
+
+  await page.evaluate(() => {
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+  }).catch(() => {});
+  await page.waitForTimeout(800);
+
+  for (const item of candidates) {
+    const count = await item.locator.count().catch(() => 0);
+    if (!count) continue;
+
+    for (let i = 0; i < count; i++) {
+      const loc = item.locator.nth(i);
+
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(500);
+
+      const clickResult = await clickLocatorRobust(loc, {
+        selector: item.selector,
+      });
+
+      if (clickResult.clicked) {
+        result.clicked = true;
+        result.selector = item.selector;
+        result.method = clickResult.method;
+        result.afterUrl = page.url();
+
+        await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+        await page.waitForTimeout(3000);
+
+        result.afterUrl = page.url();
+        return result;
+      }
+
+      result.error = clickResult.error || `Falha ao clicar em ${item.selector}`;
+    }
+  }
+
+  result.afterUrl = page.url();
+  result.error = result.error || 'Não consegui clicar no bottom-continue-button.';
+  return result;
+}
+
 async function clickUseThisPaymentMethod(page) {
   const result = {
     clicked: false,
@@ -1891,6 +1967,27 @@ async function clickUseThisPaymentMethod(page) {
     attempts: [],
     error: '',
   };
+
+  const bottomClick = await clickBottomContinueButton(page);
+
+  result.attempts.push({
+    selector: bottomClick.selector || 'bottom-continue-button-direct',
+    clicked: bottomClick.clicked,
+    method: bottomClick.method,
+    beforeUrl: bottomClick.beforeUrl,
+    afterUrl: bottomClick.afterUrl,
+    reachedSummaryAfterClick: bottomClick.clicked ? await isCheckoutSummaryPage(page) : false,
+    error: bottomClick.error || '',
+  });
+
+  if (bottomClick.clicked) {
+    result.clicked = true;
+    result.selector = bottomClick.selector;
+    result.method = bottomClick.method;
+    result.afterUrl = page.url();
+    result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+    return result;
+  }
 
   const candidates = [
     {
