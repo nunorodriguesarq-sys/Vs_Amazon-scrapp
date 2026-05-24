@@ -2026,32 +2026,32 @@ async function isCouponPanelClosedAfterContinue(page) {
     .isVisible()
     .catch(() => false);
 
-  const bottomContinueVisible = await page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]')
+  const bottomButtonVisible = await page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]')
     .first()
     .isVisible()
     .catch(() => false);
 
-  const primaryContinueVisible = await page.locator('#checkout-primary-continue-button-id')
+  const bottomButtonTextVisible = await page.locator('#checkout-primary-continue-button-id-announce')
     .first()
     .isVisible()
     .catch(() => false);
 
-  const insertCodeVisible = await page.getByText(/Inserir código|Introduzir código|Introducir código/i)
-    .first()
-    .isVisible()
-    .catch(() => false);
+  const inputFocused = await page.evaluate(() => {
+    const el = document.activeElement;
+    if (!el) return false;
+    return (
+      el.getAttribute('data-testid') === 'input-claim-code-text-input' ||
+      el.id?.includes('claim') ||
+      el.name?.includes('claim')
+    );
+  }).catch(() => false);
 
-  // Painel fechado: input e seta deixam de estar visíveis.
-  if (!inputVisible && !pressableVisible && !insertCodeVisible) {
-    return true;
+  // Painel aberto: ainda há input, seta ou botão inferior visível.
+  if (inputVisible || pressableVisible || bottomButtonVisible || bottomButtonTextVisible || inputFocused) {
+    return false;
   }
 
-  // Também aceitar se o botão inferior desapareceu depois do clique.
-  if (!bottomContinueVisible && !primaryContinueVisible && !inputVisible) {
-    return true;
-  }
-
-  return false;
+  return true;
 }
 
 async function clickContinuePaymentButton(page, locator, selector) {
@@ -2594,157 +2594,198 @@ async function clickBottomContinueAfterCouponMessage(page) {
     error: '',
   };
 
-  try {
-    await page.waitForTimeout(1000);
+  const candidates = [
+    {
+      locator: page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]'),
+      selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
+    },
+    {
+      locator: page.locator('#checkout-primary-continue-button-id-announce'),
+      selector: '#checkout-primary-continue-button-id-announce',
+    },
+    {
+      locator: page.locator('#checkout-primary-continue-button-id .a-button-inner'),
+      selector: '#checkout-primary-continue-button-id .a-button-inner',
+    },
+    {
+      locator: page.locator('#checkout-primary-continue-button-id'),
+      selector: '#checkout-primary-continue-button-id',
+    },
+    {
+      locator: page.locator('span.a-declarative[data-action="checkout-continue-button-click-action"]:has(#checkout-primary-continue-button-id)'),
+      selector: 'span.a-declarative[data-action="checkout-continue-button-click-action"]:has(#checkout-primary-continue-button-id)',
+    },
+    {
+      locator: page.getByTestId('bottom-continue-button'),
+      selector: 'testid=bottom-continue-button',
+    },
+  ];
 
-    const candidates = [
-      {
-        locator: page.locator('span.a-declarative[data-action="checkout-continue-button-click-action"]:has(#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"])'),
-        selector: 'span.a-declarative[data-action="checkout-continue-button-click-action"]:has(#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"])',
-        preferred: true,
-      },
-      {
-        locator: page.locator('#checkout-primary-continue-button-id'),
-        selector: '#checkout-primary-continue-button-id',
-      },
-      {
-        locator: page.locator('#checkout-primary-continue-button-id .a-button-inner'),
-        selector: '#checkout-primary-continue-button-id .a-button-inner',
-      },
-      {
-        locator: page.locator('#checkout-primary-continue-button-id-announce'),
-        selector: '#checkout-primary-continue-button-id-announce',
-      },
-      {
-        locator: page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]'),
-        selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
-      },
-      {
-        locator: page.getByTestId('bottom-continue-button'),
-        selector: 'testid=bottom-continue-button',
-      },
-    ];
+  try {
+    await page.waitForTimeout(1500);
 
     let lastError = '';
 
-    for (const item of candidates) {
-      const count = await item.locator.count().catch(() => 0);
-
-      result.candidatesDebug.push({
-        selector: item.selector,
-        count,
-      });
-
-      if (!count) continue;
-
-      for (let i = count - 1; i >= 0; i--) {
-        const loc = item.locator.nth(i);
-
-        await loc.scrollIntoViewIfNeeded().catch(() => {});
-        await page.waitForTimeout(700);
-
-        const visibleBefore = await loc.isVisible().catch(() => false);
-        const enabledBefore = await loc.isEnabled?.().catch(() => true);
-        const textBefore = await loc.innerText({ timeout: 1000 }).catch(() => '');
-        const valueBefore = await loc.getAttribute('value').catch(() => '');
-        const ariaBefore = await loc.getAttribute('aria-labelledby').catch(() => '');
+    for (let round = 1; round <= 3; round++) {
+      for (const item of candidates) {
+        const count = await item.locator.count().catch(() => 0);
 
         result.candidatesDebug.push({
+          round,
           selector: item.selector,
-          index: i,
-          visibleBefore,
-          enabledBefore,
-          textBefore,
-          valueBefore,
-          ariaBefore,
+          count,
         });
 
-        if (!visibleBefore && !item.selector.includes('input')) {
-          lastError = `Elemento não visível: ${item.selector}`;
-          continue;
-        }
+        if (!count) continue;
 
-        const beforeUrl = page.url();
+        for (let i = count - 1; i >= 0; i--) {
+          const loc = item.locator.nth(i);
 
-        const clickMethods = [
-          async () => {
-            await loc.click({ timeout: 8000 });
-            return 'normal-click';
-          },
-          async () => {
-            const box = await loc.boundingBox();
-            if (!box) throw new Error('Sem boundingBox');
-            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-            await page.waitForTimeout(150);
-            await page.mouse.down();
-            await page.waitForTimeout(120);
-            await page.mouse.up();
-            return 'mouse-click';
-          },
-          async () => {
-            await loc.click({ timeout: 8000, force: true });
-            return 'force-click';
-          },
-          async () => {
-            const ok = await loc.evaluate(el => {
-              if (!el) return false;
-              el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
-              el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-              el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-              el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-              return true;
-            });
-            if (!ok) throw new Error('JS dispatch falhou');
-            return 'js-mouse-events';
-          },
-        ];
+          await loc.scrollIntoViewIfNeeded().catch(() => {});
+          await page.waitForTimeout(700);
 
-        for (const method of clickMethods) {
-          try {
-            const methodName = await method();
+          await page.evaluate(() => window.scrollBy(0, -180)).catch(() => {});
+          await page.waitForTimeout(400);
 
-            await page.waitForLoadState('domcontentloaded', { timeout: 12000 }).catch(() => {});
-            await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-            await page.waitForTimeout(3000);
+          const box = await loc.boundingBox().catch(() => null);
+          const visible = await loc.isVisible().catch(() => false);
+          const enabled = await loc.isEnabled?.().catch(() => true);
+          const text = await loc.innerText({ timeout: 1000 }).catch(() => '');
+          const value = await loc.getAttribute('value').catch(() => '');
+          const aria = await loc.getAttribute('aria-labelledby').catch(() => '');
 
-            result.clicked = true;
-            result.selector = item.selector;
-            result.method = methodName;
-            result.beforeUrl = beforeUrl;
-            result.afterUrl = page.url();
-            result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
-            result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
-            result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
+          result.candidatesDebug.push({
+            round,
+            selector: item.selector,
+            index: i,
+            visible,
+            enabled,
+            text,
+            value,
+            aria,
+            box,
+          });
 
-            const urlMovedToSpc =
-              result.beforeUrl.includes('/pay') &&
-              result.afterUrl.includes('/spc');
+          if (!enabled) {
+            lastError = `Botão encontrado mas não enabled: ${item.selector}`;
+            continue;
+          }
 
-            if (
-              result.couponPanelClosedAfterContinue ||
-              urlMovedToSpc ||
-              result.reachedSummaryAfterClick
-            ) {
-              return result;
+          const beforeUrl = page.url();
+
+          const attempts = [
+            {
+              name: 'mouse-center-click',
+              fn: async () => {
+                const b = await loc.boundingBox();
+                if (!b) throw new Error('Sem boundingBox');
+                await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+                await page.waitForTimeout(200);
+                await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2, { delay: 120 });
+              },
+            },
+            {
+              name: 'normal-click',
+              fn: async () => {
+                await loc.click({ timeout: 8000 });
+              },
+            },
+            {
+              name: 'press-enter-after-focus',
+              fn: async () => {
+                await loc.focus({ timeout: 3000 }).catch(() => {});
+                await page.keyboard.press('Enter');
+              },
+            },
+            {
+              name: 'space-after-focus',
+              fn: async () => {
+                await loc.focus({ timeout: 3000 }).catch(() => {});
+                await page.keyboard.press(' ');
+              },
+            },
+            {
+              name: 'force-click',
+              fn: async () => {
+                await loc.click({ timeout: 8000, force: true });
+              },
+            },
+            {
+              name: 'js-click-events',
+              fn: async () => {
+                await loc.evaluate(el => {
+                  el.scrollIntoView({ block: 'center', inline: 'center' });
+
+                  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+                    el.dispatchEvent(new MouseEvent(type, {
+                      bubbles: true,
+                      cancelable: true,
+                      view: window,
+                    }));
+                  }
+
+                  if (typeof el.click === 'function') el.click();
+                });
+              },
+            },
+          ];
+
+          for (const attempt of attempts) {
+            try {
+              await attempt.fn();
+
+              await page.waitForLoadState('domcontentloaded', { timeout: 12000 }).catch(() => {});
+              await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+              await page.waitForTimeout(2500);
+
+              const panelClosed = await isCouponPanelClosedAfterContinue(page);
+              const afterUrl = page.url();
+              const urlMovedToSpc = beforeUrl.includes('/pay') && afterUrl.includes('/spc');
+
+              result.candidatesDebug.push({
+                round,
+                selector: item.selector,
+                index: i,
+                attempt: attempt.name,
+                afterUrl,
+                panelClosed,
+                urlMovedToSpc,
+              });
+
+              if (panelClosed || urlMovedToSpc) {
+                result.clicked = true;
+                result.selector = item.selector;
+                result.method = attempt.name;
+                result.beforeUrl = beforeUrl;
+                result.afterUrl = afterUrl;
+                result.couponPanelClosedAfterContinue = panelClosed;
+                result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
+                result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
+                return result;
+              }
+
+              lastError = `Clique ${attempt.name} executado em ${item.selector}, mas painel continuou aberto.`;
+            } catch (err) {
+              lastError = `${item.selector} / ${attempt.name}: ${err?.message || String(err)}`;
             }
-
-            result.clicked = false;
-            lastError = `Clique executado em ${item.selector} por ${methodName}, mas o painel continuou aberto. before=${result.beforeUrl} after=${result.afterUrl}`;
-          } catch (err) {
-            lastError = `${item.selector}: ${err?.message || String(err)}`;
           }
         }
       }
+
+      await page.waitForTimeout(1000);
     }
 
     result.clicked = false;
     result.afterUrl = page.url();
-    result.error = lastError || 'Não consegui clicar no botão de baixo de forma efetiva.';
+    result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
+    result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
+    result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
+    result.error = lastError || 'Não consegui fechar o painel do cupão clicando no botão de baixo.';
     return result;
   } catch (err) {
     result.clicked = false;
-    result.error = err?.message || String(err);
     result.afterUrl = page.url();
+    result.error = err?.message || String(err);
     return result;
   }
 }
@@ -2951,7 +2992,6 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
       continueResult.clicked &&
       (
         continueResult.couponPanelClosedAfterContinue ||
-        continueResult.reachedSummaryAfterClick ||
         urlMovedToSpc
       )
     ) {
