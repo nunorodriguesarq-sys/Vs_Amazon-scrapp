@@ -463,8 +463,7 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
     'span:has-text("Aplicar cupón")'
   ].join(',')).count().catch(() => 0) > 0;
 
-  const detectedCouponCode = detectCouponCode(bodyText);
-  const couponCode = productInput.manualCouponCode || detectedCouponCode;
+  const couponCode = productInput.manualCouponCode || '';
   const signals = detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp });
   if (productInput.manualCouponCode) {
     signals.hasManualCouponCode = true;
@@ -681,11 +680,20 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
     'desconto no checkout',
     'se aplicará al finalizar la compra',
     'se aplica al finalizar la compra',
+    'ao finalizar compra',
+    'ao finalizar a compra',
+    'ao finalizar o pedido',
+    'ao concluir a compra',
+    'ao tramitar o pedido',
+    'al finalizar la compra',
     'al tramitar el pedido',
     'en la compra de artículos seleccionados',
     'en la compra de productos seleccionados',
     'comprar artículos elegibles',
-  ]);
+  ]) || /poup(?:ar|e)\s+[\d,.]+\s*€?.{0,80}(?:ao|a)\s+finalizar\s+(?:a\s+)?compra/i.test(text)
+    || /ahorr(?:a|ar)\s+[\d,.]+\s*€?.{0,80}al\s+finalizar\s+la\s+compra/i.test(text)
+    || /poup(?:ar|e).{0,80}finalizar\s+(?:a\s+)?compra/i.test(text)
+    || /ahorr(?:a|ar).{0,80}finalizar\s+la\s+compra/i.test(text);
 
   const hasFlashSale = includesAny(text, [
     'Oferta flash',
@@ -705,13 +713,7 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
   const unitPromotionText = detectUnitPromotionText(text);
   const hasUnitsPromotion = Boolean(unitPromotionText);
 
-  const hasCouponCodeOnlyAtCheckout = includesAny(text, [
-    'Introduce el código',
-    'Introduza o código',
-    'código promocional',
-    'código de descuento',
-    'código de cupón',
-  ]);
+  const hasCouponCodeOnlyAtCheckout = false;
 
   const hasVisiblePrice = Boolean(price || snsPrice);
   const hasVisiblePvp = Boolean(pvp);
@@ -754,9 +756,9 @@ function detectPromotionKind({
   if (useSubscribeAndSave && validCouponCode) return 'sns+coupon';
   if (useSubscribeAndSave) return 'sns';
 
+  if (hasApplyCoupon && hasCheckoutDiscount) return 'apply+checkout';
   if (hasAppliedCoupon || hasCouponCheckboxDom) return 'apply';
   if (hasApplyCoupon && validCouponCode) return 'apply+coupon';
-  if (hasApplyCoupon && hasCheckoutDiscount) return 'apply+checkout';
   if (hasApplyCoupon) return 'apply';
 
   if (hasCheckoutDiscount) return 'checkout';
