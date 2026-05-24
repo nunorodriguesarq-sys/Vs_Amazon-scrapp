@@ -895,13 +895,30 @@ async function applyCouponCheckboxIfPresent(page) {
 }
 
 async function extractCheckoutFinalPriceFromPage(page) {
-  const selectors = [
+  const prioritySelectors = [
+    '#subtotals-marketplace-table > li.grand-total-cell > span > div > div.order-summary-line-definition > span',
+    '#subtotals-marketplace-table li.grand-total-cell .order-summary-line-definition span',
+    '#subtotals-marketplace-table li.grand-total-cell span',
+    'li.grand-total-cell .order-summary-line-definition span',
+    'li.grand-total-cell span',
+  ];
+
+  for (const selector of prioritySelectors) {
+    const values = await allTexts(page, selector, 20);
+
+    for (const value of values) {
+      const price = normalizePriceText(value);
+      if (price) return price;
+    }
+  }
+
+  const fallbackSelectors = [
     '[data-shimmer-target="ordertotals-amount"]',
     '.order-summary-line-definition [data-shimmer-target="ordertotals-amount"]',
     '#subtotals-marketplace-table [data-shimmer-target="ordertotals-amount"]',
   ];
 
-  for (const selector of selectors) {
+  for (const selector of fallbackSelectors) {
     const values = await allTexts(page, selector, 20);
     if (values.length) {
       return normalizePriceText(values[values.length - 1]);
@@ -909,6 +926,63 @@ async function extractCheckoutFinalPriceFromPage(page) {
   }
 
   return '';
+}
+
+async function extractCheckoutFinalPriceDetailed(page) {
+  const result = {
+    price: '',
+    selector: '',
+    rawText: '',
+    source: '',
+  };
+
+  const prioritySelectors = [
+    '#subtotals-marketplace-table > li.grand-total-cell > span > div > div.order-summary-line-definition > span',
+    '#subtotals-marketplace-table li.grand-total-cell .order-summary-line-definition span',
+    '#subtotals-marketplace-table li.grand-total-cell span',
+    'li.grand-total-cell .order-summary-line-definition span',
+    'li.grand-total-cell span',
+  ];
+
+  for (const selector of prioritySelectors) {
+    const values = await allTexts(page, selector, 20);
+
+    for (const value of values) {
+      const price = normalizePriceText(value);
+      if (price) {
+        result.price = price;
+        result.selector = selector;
+        result.rawText = value;
+        result.source = 'priority-grand-total';
+        return result;
+      }
+    }
+  }
+
+  const fallbackSelectors = [
+    '[data-shimmer-target="ordertotals-amount"]',
+    '.order-summary-line-definition [data-shimmer-target="ordertotals-amount"]',
+    '#subtotals-marketplace-table [data-shimmer-target="ordertotals-amount"]',
+  ];
+
+  for (const selector of fallbackSelectors) {
+    const values = await allTexts(page, selector, 20);
+
+    if (values.length) {
+      const rawText = values[values.length - 1];
+      const price = normalizePriceText(rawText);
+
+      if (price) {
+        result.price = price;
+        result.selector = selector;
+        result.rawText = rawText;
+        result.source = 'fallback-ordertotals';
+        return result;
+      }
+    }
+  }
+
+  return result;
 }
 
 async function getCurrentQuantityValue(page) {
@@ -1693,10 +1767,13 @@ async function simulateCheckout(page, product, options = {}) {
 
     result.reachedCheckoutSummary = true;
 
+    const finalPriceDetailed = await extractCheckoutFinalPriceDetailed(page);
+    result.finalPriceDebug = finalPriceDetailed;
+
     result.finalPrice =
-      await extractCheckoutFinalPriceFromPage(page) ||
+      finalPriceDetailed.price ||
       extractCheckoutFinalPrice(checkoutText) ||
-      findBestPriceNearWords(checkoutText, ['Total del pedido', 'Total do pedido', 'Total', 'Importe total']);
+      findBestPriceNearWords(checkoutText, ['Valor total', 'Total del pedido', 'Total do pedido', 'Total', 'Importe total']);
 
     result.subtotal = findBestPriceNearWords(checkoutText, ['Produtos', 'Productos', 'Subtotal', 'Total parcial']);
     result.discountText = extractDiscountSummary(checkoutText);
@@ -1725,7 +1802,11 @@ function interpretCouponMessage(text) {
     lower.includes('se aplicará') ||
     lower.includes('desconto aplicado') ||
     lower.includes('promoção aplicada') ||
-    lower.includes('promoción aplicada')
+    lower.includes('promoción aplicada') ||
+    lower.includes('poupanças') ||
+    lower.includes('ahorros') ||
+    lower.includes('cupons da amazon') ||
+    lower.includes('cupones de amazon')
   ) {
     return 'accepted';
   }
@@ -1765,12 +1846,16 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
 
   const messageCandidates = [
     {
-      locator: page.locator('[data-testid*="claim-code"] span'),
-      selector: '[data-testid*="claim-code"] span',
+      locator: page.locator('[id] > div.css-146c3p1 > span'),
+      selector: '[id] > div.css-146c3p1 > span',
     },
     {
-      locator: page.locator('[data-testid*="claim-code"] div'),
-      selector: '[data-testid*="claim-code"] div',
+      locator: page.locator('[id] div.css-146c3p1 > span'),
+      selector: '[id] div.css-146c3p1 > span',
+    },
+    {
+      locator: page.locator('div.css-146c3p1 > span'),
+      selector: 'div.css-146c3p1 > span',
     },
     {
       locator: page.locator('[id] div.css-146c3p1 span'),
@@ -1781,12 +1866,36 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
       selector: '[id] div.css-146c3p1',
     },
     {
+      locator: page.locator('[data-testid*="claim-code"] span'),
+      selector: '[data-testid*="claim-code"] span',
+    },
+    {
+      locator: page.locator('[data-testid*="claim-code"] div'),
+      selector: '[data-testid*="claim-code"] div',
+    },
+    {
       locator: page.locator('span:has-text("aplicado")'),
       selector: 'span:has-text("aplicado")',
     },
     {
       locator: page.locator('span:has-text("aplicada")'),
       selector: 'span:has-text("aplicada")',
+    },
+    {
+      locator: page.locator('span:has-text("Promoção aplicada")'),
+      selector: 'span:has-text("Promoção aplicada")',
+    },
+    {
+      locator: page.locator('span:has-text("Promoción aplicada")'),
+      selector: 'span:has-text("Promoción aplicada")',
+    },
+    {
+      locator: page.locator('span:has-text("Poupanças")'),
+      selector: 'span:has-text("Poupanças")',
+    },
+    {
+      locator: page.locator('span:has-text("Ahorros")'),
+      selector: 'span:has-text("Ahorros")',
     },
     {
       locator: page.locator('span:has-text("não")'),
@@ -1843,6 +1952,12 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
           lower.includes('desconto aplicado') ||
           lower.includes('promoção aplicada') ||
           lower.includes('promoción aplicada') ||
+          lower.includes('poupanças') ||
+          lower.includes('ahorros') ||
+          lower.includes('cupons da amazon') ||
+          lower.includes('cupones de amazon') ||
+          lower.includes('promoção') ||
+          lower.includes('promoción') ||
           lower.includes('não é aplicável') ||
           lower.includes('no es aplicable') ||
           lower.includes('não foi possível') ||
@@ -1854,10 +1969,10 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
           lower.includes('invalida') ||
           lower.includes('caducado') ||
           lower.includes('expirado') ||
-          lower.includes('código') && lower.includes('não') ||
-          lower.includes('codigo') && lower.includes('não') ||
-          lower.includes('código') && lower.includes('no se') ||
-          lower.includes('codigo') && lower.includes('no se');
+          (lower.includes('código') && lower.includes('não')) ||
+          (lower.includes('codigo') && lower.includes('não')) ||
+          (lower.includes('código') && lower.includes('no se')) ||
+          (lower.includes('codigo') && lower.includes('no se'));
 
         if (looksLikeRealCouponMessage) {
           return {
@@ -1878,6 +1993,7 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
     text: '',
   };
 }
+
 
 async function isCouponPanelClosedAfterContinue(page) {
   const inputVisible = await page.getByTestId('input-claim-code-text-input')
