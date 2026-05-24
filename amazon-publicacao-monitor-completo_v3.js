@@ -2140,6 +2140,91 @@ async function isCheckoutSummaryPage(page) {
   return hasTotals;
 }
 
+async function clickConfirmedBottomContinueButton(page) {
+  const result = {
+    clicked: false,
+    selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
+    method: '',
+    beforeUrl: page.url(),
+    afterUrl: '',
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
+    reachedSummaryAfterClick: false,
+    error: '',
+  };
+
+  try {
+    const locator = page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]').first();
+
+    const count = await locator.count().catch(() => 0);
+    if (!count) {
+      result.error = 'Seletor confirmado não encontrado.';
+      result.afterUrl = page.url();
+      return result;
+    }
+
+    await page.evaluate(() => {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+    }).catch(() => {});
+
+    await page.waitForTimeout(700);
+
+    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(500);
+
+    try {
+      await locator.click({ timeout: 8000 });
+      result.clicked = true;
+      result.method = 'confirmed-normal-click';
+    } catch (err1) {
+      result.error = err1?.message || String(err1);
+
+      try {
+        await locator.click({ timeout: 8000, force: true });
+        result.clicked = true;
+        result.method = 'confirmed-force-click';
+      } catch (err2) {
+        result.error = `${result.error} | force: ${err2?.message || String(err2)}`;
+
+        try {
+          const ok = await locator.evaluate(el => {
+            if (!el) return false;
+            el.click();
+            return true;
+          });
+
+          if (ok) {
+            result.clicked = true;
+            result.method = 'confirmed-js-click';
+          }
+        } catch (err3) {
+          result.error = `${result.error} | js: ${err3?.message || String(err3)}`;
+        }
+      }
+    }
+
+    if (!result.clicked) {
+      result.afterUrl = page.url();
+      return result;
+    }
+
+    await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+
+    result.afterUrl = page.url();
+    result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
+    result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
+    result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    result.afterUrl = page.url();
+    return result;
+  }
+}
+
 
 async function clickBottomContinueButton(page) {
   const result = {
@@ -2155,6 +2240,10 @@ async function clickBottomContinueButton(page) {
   };
 
   const candidates = [
+    {
+      locator: page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]'),
+      selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
+    },
     {
       locator: page.locator('#checkout-primary-continue-button-id > span > input'),
       selector: '#checkout-primary-continue-button-id > span > input',
@@ -2264,6 +2353,31 @@ async function clickUseThisPaymentMethod(page) {
     error: '',
   };
 
+  const confirmedClick = await clickConfirmedBottomContinueButton(page);
+
+  result.attempts.push({
+    selector: confirmedClick.selector,
+    clicked: confirmedClick.clicked,
+    method: confirmedClick.method,
+    beforeUrl: confirmedClick.beforeUrl,
+    afterUrl: confirmedClick.afterUrl,
+    reachedSummaryAfterClick: confirmedClick.reachedSummaryAfterClick || false,
+    couponPanelClosedAfterContinue: confirmedClick.couponPanelClosedAfterContinue || false,
+    hasCheckoutTotalsAfterContinue: confirmedClick.hasCheckoutTotalsAfterContinue || false,
+    error: confirmedClick.error || '',
+  });
+
+  if (confirmedClick.clicked) {
+    result.clicked = true;
+    result.selector = confirmedClick.selector;
+    result.method = confirmedClick.method;
+    result.afterUrl = confirmedClick.afterUrl || page.url();
+    result.reachedSummaryAfterClick = confirmedClick.reachedSummaryAfterClick;
+    result.couponPanelClosedAfterContinue = confirmedClick.couponPanelClosedAfterContinue;
+    result.hasCheckoutTotalsAfterContinue = confirmedClick.hasCheckoutTotalsAfterContinue;
+    return result;
+  }
+
   const bottomClick = await clickBottomContinueButton(page);
 
   result.attempts.push({
@@ -2283,6 +2397,7 @@ async function clickUseThisPaymentMethod(page) {
     (
       bottomClick.couponPanelClosedAfterContinue ||
       bottomClick.reachedSummaryAfterClick ||
+      bottomClick.hasCheckoutTotalsAfterContinue ||
       bottomClick.selector.includes('checkout-primary-continue-button-id')
     );
 
