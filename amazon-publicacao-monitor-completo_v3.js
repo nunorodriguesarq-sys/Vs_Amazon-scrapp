@@ -1682,6 +1682,145 @@ async function simulateCheckout(page, product, options = {}) {
   }
 }
 
+function interpretCouponMessage(text) {
+  const lower = cleanSpaces(text).toLowerCase();
+
+  if (!lower) return 'unknown';
+
+  if (
+    lower.includes('aplicado') ||
+    lower.includes('aplicada') ||
+    lower.includes('aplicou') ||
+    lower.includes('aplicará') ||
+    lower.includes('se aplicará') ||
+    lower.includes('desconto aplicado') ||
+    lower.includes('promoção aplicada') ||
+    lower.includes('promoción aplicada')
+  ) {
+    return 'accepted';
+  }
+
+  if (
+    lower.includes('não') ||
+    lower.includes('no se') ||
+    lower.includes('inválido') ||
+    lower.includes('inválida') ||
+    lower.includes('invalido') ||
+    lower.includes('invalida') ||
+    lower.includes('caducado') ||
+    lower.includes('expirado') ||
+    lower.includes('não é aplicável') ||
+    lower.includes('no es aplicable')
+  ) {
+    return 'rejected';
+  }
+
+  return 'unknown';
+}
+
+async function waitForCouponApplyMessage(page, timeout = 10000) {
+  const messageCandidates = [
+    {
+      locator: page.locator('[id] div.css-146c3p1 span'),
+      selector: '[id] div.css-146c3p1 span',
+    },
+    {
+      locator: page.locator('[id] div.css-146c3p1'),
+      selector: '[id] div.css-146c3p1',
+    },
+    {
+      locator: page.locator('span:has-text("aplicado")'),
+      selector: 'span:has-text("aplicado")',
+    },
+    {
+      locator: page.locator('span:has-text("aplicada")'),
+      selector: 'span:has-text("aplicada")',
+    },
+    {
+      locator: page.locator('span:has-text("não")'),
+      selector: 'span:has-text("não")',
+    },
+    {
+      locator: page.locator('span:has-text("no se")'),
+      selector: 'span:has-text("no se")',
+    },
+    {
+      locator: page.locator('span:has-text("inválido")'),
+      selector: 'span:has-text("inválido")',
+    },
+    {
+      locator: page.locator('span:has-text("inválida")'),
+      selector: 'span:has-text("inválida")',
+    },
+    {
+      locator: page.locator('span:has-text("caducado")'),
+      selector: 'span:has-text("caducado")',
+    },
+    {
+      locator: page.locator('span:has-text("expirado")'),
+      selector: 'span:has-text("expirado")',
+    },
+    {
+      locator: page.locator('span:has-text("promo")'),
+      selector: 'span:has-text("promo")',
+    },
+    {
+      locator: page.locator('span:has-text("cupão")'),
+      selector: 'span:has-text("cupão")',
+    },
+    {
+      locator: page.locator('span:has-text("cupón")'),
+      selector: 'span:has-text("cupón")',
+    },
+  ];
+
+  const start = Date.now();
+
+  while (Date.now() - start < timeout) {
+    for (const item of messageCandidates) {
+      const count = await item.locator.count().catch(() => 0);
+      if (!count) continue;
+
+      for (let i = 0; i < count; i++) {
+        const loc = item.locator.nth(i);
+        const visible = await loc.isVisible().catch(() => false);
+        if (!visible) continue;
+
+        const text = cleanSpaces(await loc.innerText({ timeout: 1000 }).catch(() => ''));
+        if (!text) continue;
+
+        const lower = text.toLowerCase();
+
+        if (
+          lower.includes('cup') ||
+          lower.includes('promo') ||
+          lower.includes('aplic') ||
+          lower.includes('invál') ||
+          lower.includes('inval') ||
+          lower.includes('caduc') ||
+          lower.includes('expir') ||
+          lower.includes('não') ||
+          lower.includes('no se')
+        ) {
+          return {
+            found: true,
+            selector: item.selector,
+            text,
+          };
+        }
+      }
+    }
+
+    await page.waitForTimeout(300);
+  }
+
+  return {
+    found: false,
+    selector: '',
+    text: '',
+  };
+}
+
 async function applyCouponCodeAtCheckout(page, couponCode) {
   const result = {
     attempted: Boolean(couponCode),
@@ -1695,6 +1834,13 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
     selector: '',
     buttonSelector: '',
     method: '',
+    couponPressableSelector: '',
+    couponPressableClicked: false,
+    couponMessageFound: false,
+    couponMessageSelector: '',
+    couponMessageText: '',
+    couponMessageStatus: 'unknown',
+    continuedAfterCouponMessage: false,
     error: '',
   };
 
@@ -1751,13 +1897,18 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
 
     if (!inputMatch) {
       const innerOpenCandidates = [
-        { locator: page.locator('.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)'), selector: '.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)' },
+        {
+          locator: page.locator('.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)'),
+          selector: '.css-g5y9jx.r-1otgn73 > div > div > .css-g5y9jx.r-1loqt21 > div:nth-child(3)',
+        },
+        { locator: page.getByText(/voucher ou código promocional/i), selector: 'text=/voucher ou código promocional/i' },
+        { locator: page.getByText(/cartão oferta/i), selector: 'text=/cartão oferta/i' },
+        { locator: page.getByText(/código promocional/i), selector: 'text=/código promocional/i' },
+        { locator: page.getByText(/código de promoción/i), selector: 'text=/código de promoción/i' },
         { locator: page.getByText(/Introduzir código/i), selector: 'text=/Introduzir código/i' },
         { locator: page.getByText(/Introducir código/i), selector: 'text=/Introducir código/i' },
         { locator: page.getByText(/Adicionar código/i), selector: 'text=/Adicionar código/i' },
         { locator: page.getByText(/Añadir código/i), selector: 'text=/Añadir código/i' },
-        { locator: page.getByText(/código promocional/i), selector: 'text=/código promocional/i' },
-        { locator: page.getByText(/código de promoción/i), selector: 'text=/código de promoción/i' },
       ];
 
       for (const item of innerOpenCandidates) {
@@ -1790,44 +1941,98 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
 
     await input.scrollIntoViewIfNeeded().catch(() => {});
     await input.click({ timeout: 5000, force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+
+    await input.fill('', { timeout: 5000 }).catch(() => {});
     await input.fill(couponCode, { timeout: 5000 }).catch(async () => {
-      await input.pressSequentially(couponCode).catch(() => {});
+      await input.click({ timeout: 5000, force: true }).catch(() => {});
+      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => {});
+      await page.keyboard.type(couponCode).catch(async () => {
+        await input.pressSequentially(couponCode).catch(() => {});
+      });
     });
 
-    result.filled = true;
+    const inputValue = await input.inputValue().catch(() => '');
+    result.filled = inputValue.trim().toUpperCase() === String(couponCode).trim().toUpperCase();
 
-    const buttonCandidates = [
-      { locator: page.getByTestId('bottom-continue-button'), selector: 'testid=bottom-continue-button' },
-      { locator: page.locator('[data-testid="bottom-continue-button"]'), selector: '[data-testid="bottom-continue-button"]' },
-      { locator: page.locator('input[name="applyClaimCode"]'), selector: 'input[name="applyClaimCode"]' },
-      { locator: page.locator('input[type="submit"][value*="Aplicar"]'), selector: 'input[type="submit"][value*="Aplicar"]' },
-      { locator: page.locator('button:has-text("Aplicar")'), selector: 'button:has-text("Aplicar")' },
-      { locator: page.locator('button:has-text("Continuar")'), selector: 'button:has-text("Continuar")' },
-      { locator: page.locator('button:has-text("Continue")'), selector: 'button:has-text("Continue")' },
-      { locator: page.locator('input[type="submit"][value*="Apply"]'), selector: 'input[type="submit"][value*="Apply"]' },
-      { locator: page.locator('button:has-text("Apply")'), selector: 'button:has-text("Apply")' },
-    ];
-
-    const buttonMatch = await waitForFirstAvailableLocator(page, buttonCandidates, 8000);
-
-    if (!buttonMatch) {
-      result.error = 'Cupão preenchido, mas não encontrei botão para aplicar/continuar.';
+    if (!result.filled) {
+      result.error = `Campo encontrado mas valor não ficou correto. Valor atual: ${inputValue}`;
       return result;
     }
 
-    const clickResult = await clickLocatorRobust(buttonMatch.locator, {
-      selector: buttonMatch.selector,
+    const applyCodeCandidates = [
+      { locator: page.getByTestId('input-claim-code-pressable'), selector: 'testid=input-claim-code-pressable' },
+      { locator: page.locator('[data-testid="input-claim-code-pressable"]'), selector: '[data-testid="input-claim-code-pressable"]' },
+      { locator: page.locator('button[aria-label*="Aplicar"]'), selector: 'button[aria-label*="Aplicar"]' },
+      { locator: page.locator('button[aria-label*="Apply"]'), selector: 'button[aria-label*="Apply"]' },
+      { locator: page.locator('button:has-text("Aplicar")'), selector: 'button:has-text("Aplicar")' },
+      { locator: page.locator('button:has-text("Apply")'), selector: 'button:has-text("Apply")' },
+    ];
+
+    const applyCodeButton = await waitForFirstAvailableLocator(page, applyCodeCandidates, 8000);
+
+    if (!applyCodeButton) {
+      result.error = 'Cupão preenchido, mas não encontrei a seta/botão para aplicar o código.';
+      return result;
+    }
+
+    const applyCodeClick = await clickLocatorRobust(applyCodeButton.locator, {
+      selector: applyCodeButton.selector,
     });
 
-    if (clickResult.clicked) {
+    if (!applyCodeClick.clicked) {
+      result.error = applyCodeClick.error || 'Falha ao clicar na seta/botão de aplicar código.';
+      return result;
+    }
+
+    result.couponPressableClicked = true;
+    result.couponPressableSelector = applyCodeButton.selector;
+
+    const message = await waitForCouponApplyMessage(page, 12000);
+
+    result.couponMessageFound = message.found;
+    result.couponMessageSelector = message.selector;
+    result.couponMessageText = message.text;
+
+    if (!message.found) {
+      result.error = 'Código preenchido e botão aplicar clicado, mas não surgiu mensagem de validação do cupão.';
+      return result;
+    }
+
+    result.couponMessageStatus = interpretCouponMessage(message.text);
+
+    const continueCandidates = [
+      { locator: page.getByTestId('bottom-continue-button'), selector: 'testid=bottom-continue-button' },
+      { locator: page.locator('[data-testid="bottom-continue-button"]'), selector: '[data-testid="bottom-continue-button"]' },
+      { locator: page.getByRole('button', { name: /Utilizar esta forma de pagamento/i }), selector: 'role=button[name~/Utilizar esta forma de pagamento/i]' },
+      { locator: page.getByRole('button', { name: /Usar este método de pago/i }), selector: 'role=button[name~/Usar este método de pago/i]' },
+      { locator: page.locator('button:has-text("Utilizar esta forma de pagamento")'), selector: 'button:has-text("Utilizar esta forma de pagamento")' },
+      { locator: page.locator('button:has-text("Usar este método de pago")'), selector: 'button:has-text("Usar este método de pago")' },
+    ];
+
+    const continueButton = await waitForFirstAvailableLocator(page, continueCandidates, 8000);
+
+    if (!continueButton) {
+      result.error = 'Cupão validado, mas não encontrei botão "Utilizar esta forma de pagamento".';
+      return result;
+    }
+
+    const continueClick = await clickLocatorRobust(continueButton.locator, {
+      selector: continueButton.selector,
+    });
+
+    if (continueClick.clicked) {
       result.submitted = true;
-      result.buttonSelector = buttonMatch.selector;
-      result.method = clickResult.method;
+      result.continuedAfterCouponMessage = true;
+      result.buttonSelector = continueButton.selector;
+      result.method = continueClick.method;
+      await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
       await page.waitForTimeout(3000);
       return result;
     }
 
-    result.error = clickResult.error || 'Falha ao clicar no botão para aplicar/continuar.';
+    result.error = continueClick.error || 'Falha ao clicar em "Utilizar esta forma de pagamento".';
     return result;
   } catch (err) {
     result.error = err?.message || String(err);
