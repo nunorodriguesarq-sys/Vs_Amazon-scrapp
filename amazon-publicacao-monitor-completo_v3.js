@@ -2054,71 +2054,6 @@ async function isCouponPanelClosedAfterContinue(page) {
   return true;
 }
 
-async function clickContinuePaymentButton(page, locator, selector) {
-  const result = {
-    clicked: false,
-    selector,
-    method: '',
-    error: '',
-  };
-
-  try {
-    await locator.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(500);
-
-    try {
-      await locator.click({ timeout: 5000 });
-      result.clicked = true;
-      result.method = 'normal-click';
-      return result;
-    } catch (err1) {
-      result.error = err1?.message || String(err1);
-    }
-
-    try {
-      await locator.click({ timeout: 5000, force: true });
-      result.clicked = true;
-      result.method = 'force-click';
-      return result;
-    } catch (err2) {
-      result.error = `${result.error} | force: ${err2?.message || String(err2)}`;
-    }
-
-    try {
-      const ok = await locator.evaluate((el) => {
-        if (!el) return false;
-        el.click();
-        return true;
-      });
-
-      if (ok) {
-        result.clicked = true;
-        result.method = 'js-click';
-        return result;
-      }
-    } catch (err3) {
-      result.error = `${result.error} | js: ${err3?.message || String(err3)}`;
-    }
-
-    try {
-      const box = await locator.boundingBox();
-      if (box) {
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        result.clicked = true;
-        result.method = 'mouse-click';
-        return result;
-      }
-    } catch (err4) {
-      result.error = `${result.error} | mouse: ${err4?.message || String(err4)}`;
-    }
-
-    return result;
-  } catch (err) {
-    result.error = err?.message || String(err);
-    return result;
-  }
-}
-
 async function hasCheckoutTotalsVisible(page) {
   const selectors = [
     '[data-shimmer-target="ordertotals-amount"]',
@@ -2200,390 +2135,10 @@ async function isCheckoutSummaryPageStrictAfterCoupon(page) {
   return Boolean(finalOrderButtonVisible || finalOrderTextVisible);
 }
 
-async function clickConfirmedBottomContinueButton(page) {
-  const result = {
-    clicked: false,
-    selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
-    method: '',
-    beforeUrl: page.url(),
-    afterUrl: '',
-    couponPanelClosedAfterContinue: false,
-    hasCheckoutTotalsAfterContinue: false,
-    reachedSummaryAfterClick: false,
-    error: '',
-  };
-
-  try {
-    const locator = page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]').first();
-
-    const count = await locator.count().catch(() => 0);
-    if (!count) {
-      result.error = 'Seletor confirmado não encontrado.';
-      result.afterUrl = page.url();
-      return result;
-    }
-
-    await page.evaluate(() => {
-      window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
-    }).catch(() => {});
-
-    await page.waitForTimeout(700);
-
-    await locator.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(500);
-
-    try {
-      await locator.click({ timeout: 8000 });
-      result.clicked = true;
-      result.method = 'confirmed-normal-click';
-    } catch (err1) {
-      result.error = err1?.message || String(err1);
-
-      try {
-        await locator.click({ timeout: 8000, force: true });
-        result.clicked = true;
-        result.method = 'confirmed-force-click';
-      } catch (err2) {
-        result.error = `${result.error} | force: ${err2?.message || String(err2)}`;
-
-        try {
-          const ok = await locator.evaluate(el => {
-            if (!el) return false;
-            el.click();
-            return true;
-          });
-
-          if (ok) {
-            result.clicked = true;
-            result.method = 'confirmed-js-click';
-          }
-        } catch (err3) {
-          result.error = `${result.error} | js: ${err3?.message || String(err3)}`;
-        }
-      }
-    }
-
-    if (!result.clicked) {
-      result.afterUrl = page.url();
-      return result;
-    }
-
-    await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-    await page.waitForTimeout(3000);
-
-    result.afterUrl = page.url();
-    result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
-    result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
-    result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
-
-    return result;
-  } catch (err) {
-    result.error = err?.message || String(err);
-    result.afterUrl = page.url();
-    return result;
-  }
-}
-
-
-async function clickBottomContinueButton(page) {
-  const result = {
-    clicked: false,
-    selector: '',
-    method: '',
-    beforeUrl: page.url(),
-    afterUrl: '',
-    reachedSummaryAfterClick: false,
-    couponPanelClosedAfterContinue: false,
-    hasCheckoutTotalsAfterContinue: false,
-    error: '',
-  };
-
-  const candidates = [
-    {
-      locator: page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]'),
-      selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
-    },
-    {
-      locator: page.locator('#checkout-primary-continue-button-id > span > input'),
-      selector: '#checkout-primary-continue-button-id > span > input',
-    },
-    {
-      locator: page.locator('#checkout-primary-continue-button-id input'),
-      selector: '#checkout-primary-continue-button-id input',
-    },
-    {
-      locator: page.locator('#checkout-primary-continue-button-id'),
-      selector: '#checkout-primary-continue-button-id',
-    },
-    {
-      locator: page.locator('#checkout-primary-continue-button-id-announce'),
-      selector: '#checkout-primary-continue-button-id-announce',
-    },
-    {
-      locator: page.getByTestId('bottom-continue-button'),
-      selector: 'testid=bottom-continue-button',
-    },
-    {
-      locator: page.locator('[data-testid="bottom-continue-button"]'),
-      selector: '[data-testid="bottom-continue-button"]',
-    },
-    {
-      locator: page.locator('button[data-testid="bottom-continue-button"]'),
-      selector: 'button[data-testid="bottom-continue-button"]',
-    },
-    {
-      locator: page.locator('button:has-text("Utilizar esta forma de pagamento")'),
-      selector: 'button:has-text("Utilizar esta forma de pagamento")',
-    },
-    {
-      locator: page.getByRole('button', { name: /Utilizar esta forma de pagamento/i }),
-      selector: 'role=button[name~/Utilizar esta forma de pagamento/i]',
-    },
-  ];
-
-  await page.evaluate(() => {
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
-  }).catch(() => {});
-  await page.waitForTimeout(800);
-
-  for (const item of candidates) {
-    const count = await item.locator.count().catch(() => 0);
-    if (!count) continue;
-
-    for (let i = 0; i < count; i++) {
-      const loc = item.locator.nth(i);
-
-      await loc.scrollIntoViewIfNeeded().catch(() => {});
-      await page.waitForTimeout(500);
-
-      const clickResult = await clickContinuePaymentButton(page, loc, item.selector);
-
-      if (clickResult.clicked) {
-        result.clicked = true;
-        result.selector = item.selector;
-        result.method = clickResult.method;
-        result.afterUrl = page.url();
-
-        await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-        await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-        await page.waitForTimeout(3000);
-
-        result.afterUrl = page.url();
-        const panelClosed = await isCouponPanelClosedAfterContinue(page);
-        const hasTotals = await hasCheckoutTotalsVisible(page);
-        result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
-        result.couponPanelClosedAfterContinue = panelClosed;
-        result.hasCheckoutTotalsAfterContinue = hasTotals;
-
-        if (panelClosed || result.reachedSummaryAfterClick) {
-          result.clicked = true;
-          return result;
-        }
-
-        if (hasTotals && item.selector.includes('checkout-primary-continue-button-id')) {
-          result.clicked = true;
-          return result;
-        }
-
-        result.clicked = false;
-        result.error = `Clique em ${item.selector} executado por ${clickResult.method}, mas o painel do cupão não fechou.`;
-      }
-
-      result.error = clickResult.error || `Falha ao clicar em ${item.selector}`;
-    }
-  }
-
-  result.afterUrl = page.url();
-  result.error = result.error || 'Não consegui clicar no bottom-continue-button.';
-  return result;
-}
-
-async function clickUseThisPaymentMethod(page) {
-  const result = {
-    clicked: false,
-    selector: '',
-    method: '',
-    beforeUrl: page.url(),
-    afterUrl: '',
-    reachedSummaryAfterClick: false,
-    couponPanelClosedAfterContinue: false,
-    hasCheckoutTotalsAfterContinue: false,
-    attempts: [],
-    error: '',
-  };
-
-  const confirmedClick = await clickConfirmedBottomContinueButton(page);
-
-  result.attempts.push({
-    selector: confirmedClick.selector,
-    clicked: confirmedClick.clicked,
-    method: confirmedClick.method,
-    beforeUrl: confirmedClick.beforeUrl,
-    afterUrl: confirmedClick.afterUrl,
-    reachedSummaryAfterClick: confirmedClick.reachedSummaryAfterClick || false,
-    couponPanelClosedAfterContinue: confirmedClick.couponPanelClosedAfterContinue || false,
-    hasCheckoutTotalsAfterContinue: confirmedClick.hasCheckoutTotalsAfterContinue || false,
-    error: confirmedClick.error || '',
-  });
-
-  if (confirmedClick.clicked) {
-    result.clicked = true;
-    result.selector = confirmedClick.selector;
-    result.method = confirmedClick.method;
-    result.afterUrl = confirmedClick.afterUrl || page.url();
-    result.reachedSummaryAfterClick = confirmedClick.reachedSummaryAfterClick;
-    result.couponPanelClosedAfterContinue = confirmedClick.couponPanelClosedAfterContinue;
-    result.hasCheckoutTotalsAfterContinue = confirmedClick.hasCheckoutTotalsAfterContinue;
-    return result;
-  }
-
-  const bottomClick = await clickBottomContinueButton(page);
-
-  result.attempts.push({
-    selector: bottomClick.selector || 'bottom-continue-button-direct',
-    clicked: bottomClick.clicked,
-    method: bottomClick.method,
-    beforeUrl: bottomClick.beforeUrl,
-    afterUrl: bottomClick.afterUrl,
-    reachedSummaryAfterClick: bottomClick.reachedSummaryAfterClick || false,
-    couponPanelClosedAfterContinue: bottomClick.couponPanelClosedAfterContinue || false,
-    hasCheckoutTotalsAfterContinue: bottomClick.hasCheckoutTotalsAfterContinue || false,
-    error: bottomClick.error || '',
-  });
-
-  const bottomSucceeded =
-    bottomClick.clicked &&
-    (
-      bottomClick.couponPanelClosedAfterContinue ||
-      bottomClick.reachedSummaryAfterClick ||
-      bottomClick.hasCheckoutTotalsAfterContinue ||
-      bottomClick.selector.includes('checkout-primary-continue-button-id')
-    );
-
-  if (bottomSucceeded) {
-    result.clicked = true;
-    result.selector = bottomClick.selector;
-    result.method = bottomClick.method;
-    result.afterUrl = page.url();
-    result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
-    result.couponPanelClosedAfterContinue = bottomClick.couponPanelClosedAfterContinue;
-    result.hasCheckoutTotalsAfterContinue = bottomClick.hasCheckoutTotalsAfterContinue;
-    return result;
-  }
-
-  const candidates = [
-    {
-      locator: page.getByTestId('bottom-continue-button'),
-      selector: 'testid=bottom-continue-button',
-    },
-    {
-      locator: page.locator('[data-testid="bottom-continue-button"]'),
-      selector: '[data-testid="bottom-continue-button"]',
-    },
-    {
-      locator: page.getByRole('button', { name: /Utilizar esta forma de pagamento/i }),
-      selector: 'role=button[name~/Utilizar esta forma de pagamento/i]',
-    },
-    {
-      locator: page.locator('button:has-text("Utilizar esta forma de pagamento")'),
-      selector: 'button:has-text("Utilizar esta forma de pagamento")',
-    },
-    {
-      locator: page.getByText(/Utilizar esta forma de pagamento/i),
-      selector: 'text=/Utilizar esta forma de pagamento/i',
-    },
-    {
-      locator: page.getByTestId('secondary-continue-button'),
-      selector: 'testid=secondary-continue-button',
-    },
-    {
-      locator: page.locator('[data-testid="secondary-continue-button"]'),
-      selector: '[data-testid="secondary-continue-button"]',
-    },
-    {
-      locator: page.locator('#checkout-secondary-continue-button-id input'),
-      selector: '#checkout-secondary-continue-button-id input',
-    },
-    {
-      locator: page.locator('#checkout-secondary-continue-button-id'),
-      selector: '#checkout-secondary-continue-button-id',
-    },
-    {
-      locator: page.locator('#checkout-secondary-continue-button-id-announce'),
-      selector: '#checkout-secondary-continue-button-id-announce',
-    },
-    {
-      locator: page.getByRole('button', { name: /Usar este método de pago/i }),
-      selector: 'role=button[name~/Usar este método de pago/i]',
-    },
-    {
-      locator: page.getByText(/Usar este método de pago/i),
-      selector: 'text=/Usar este método de pago/i',
-    },
-  ];
-
-  for (const item of candidates) {
-    const count = await item.locator.count().catch(() => 0);
-    if (!count) continue;
-
-    for (let i = 0; i < count; i++) {
-      const loc = item.locator.nth(i);
-      const visible = await loc.isVisible().catch(() => false);
-      if (!visible) continue;
-
-      const attempt = {
-        selector: item.selector,
-        clicked: false,
-        method: '',
-        beforeUrl: page.url(),
-        afterUrl: '',
-        reachedSummaryAfterClick: false,
-        error: '',
-      };
-
-      const clickResult = await clickLocatorRobust(loc, {
-        selector: item.selector,
-      });
-
-      attempt.clicked = clickResult.clicked;
-      attempt.method = clickResult.method || '';
-      attempt.error = clickResult.error || '';
-
-      if (!clickResult.clicked) {
-        result.attempts.push(attempt);
-        continue;
-      }
-
-      await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-      await page.waitForTimeout(3000);
-
-      attempt.afterUrl = page.url();
-      attempt.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
-
-      result.attempts.push(attempt);
-
-      if (attempt.reachedSummaryAfterClick) {
-        result.clicked = true;
-        result.selector = item.selector;
-        result.method = clickResult.method;
-        result.afterUrl = attempt.afterUrl;
-        result.reachedSummaryAfterClick = attempt.reachedSummaryAfterClick;
-        return result;
-      }
-    }
-  }
-
-  result.afterUrl = page.url();
-  result.error = 'Cliquei/tentei os botões de continuar, mas não consegui confirmar o avanço para o resumo.';
-  return result;
-}
-
 async function clickBottomContinueAfterCouponMessage(page) {
   const result = {
     clicked: false,
-    selector: '',
+    selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
     method: '',
     beforeUrl: page.url(),
     afterUrl: '',
@@ -2594,193 +2149,92 @@ async function clickBottomContinueAfterCouponMessage(page) {
     error: '',
   };
 
-  const candidates = [
-    {
-      locator: page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]'),
-      selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
-    },
-    {
-      locator: page.locator('#checkout-primary-continue-button-id-announce'),
-      selector: '#checkout-primary-continue-button-id-announce',
-    },
-    {
-      locator: page.locator('#checkout-primary-continue-button-id .a-button-inner'),
-      selector: '#checkout-primary-continue-button-id .a-button-inner',
-    },
-    {
-      locator: page.locator('#checkout-primary-continue-button-id'),
-      selector: '#checkout-primary-continue-button-id',
-    },
-    {
-      locator: page.locator('span.a-declarative[data-action="checkout-continue-button-click-action"]:has(#checkout-primary-continue-button-id)'),
-      selector: 'span.a-declarative[data-action="checkout-continue-button-click-action"]:has(#checkout-primary-continue-button-id)',
-    },
-    {
-      locator: page.getByTestId('bottom-continue-button'),
-      selector: 'testid=bottom-continue-button',
-    },
-  ];
-
   try {
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(1200);
 
-    let lastError = '';
+    const button = page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]').first();
 
-    for (let round = 1; round <= 3; round++) {
-      for (const item of candidates) {
-        const count = await item.locator.count().catch(() => 0);
+    const count = await button.count().catch(() => 0);
 
-        result.candidatesDebug.push({
-          round,
-          selector: item.selector,
-          count,
-        });
+    result.candidatesDebug.push({
+      selector: result.selector,
+      count,
+    });
 
-        if (!count) continue;
+    if (!count) {
+      result.afterUrl = page.url();
+      result.error = 'Não encontrei o botão de baixo #checkout-primary-continue-button-id input[data-testid="bottom-continue-button"].';
+      return result;
+    }
 
-        for (let i = count - 1; i >= 0; i--) {
-          const loc = item.locator.nth(i);
+    await button.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(700);
 
-          await loc.scrollIntoViewIfNeeded().catch(() => {});
-          await page.waitForTimeout(700);
+    // Colocar o botão numa zona segura do ecrã, evitando ficar encostado ao fundo.
+    await page.evaluate(() => window.scrollBy(0, -180)).catch(() => {});
+    await page.waitForTimeout(400);
 
-          await page.evaluate(() => window.scrollBy(0, -180)).catch(() => {});
-          await page.waitForTimeout(400);
+    const visible = await button.isVisible().catch(() => false);
+    const enabled = await button.isEnabled().catch(() => false);
+    const aria = await button.getAttribute('aria-labelledby').catch(() => '');
+    const box = await button.boundingBox().catch(() => null);
 
-          const box = await loc.boundingBox().catch(() => null);
-          const visible = await loc.isVisible().catch(() => false);
-          const enabled = await loc.isEnabled?.().catch(() => true);
-          const text = await loc.innerText({ timeout: 1000 }).catch(() => '');
-          const value = await loc.getAttribute('value').catch(() => '');
-          const aria = await loc.getAttribute('aria-labelledby').catch(() => '');
+    result.candidatesDebug.push({
+      selector: result.selector,
+      visible,
+      enabled,
+      aria,
+      box,
+    });
 
-          result.candidatesDebug.push({
-            round,
-            selector: item.selector,
-            index: i,
-            visible,
-            enabled,
-            text,
-            value,
-            aria,
-            box,
-          });
+    if (!enabled) {
+      result.afterUrl = page.url();
+      result.error = 'O botão de baixo existe, mas não está enabled.';
+      return result;
+    }
 
-          if (!enabled) {
-            lastError = `Botão encontrado mas não enabled: ${item.selector}`;
-            continue;
-          }
+    if (!box) {
+      result.afterUrl = page.url();
+      result.error = 'O botão de baixo existe, mas não tem boundingBox.';
+      return result;
+    }
 
-          const beforeUrl = page.url();
+    const beforeUrl = page.url();
 
-          const attempts = [
-            {
-              name: 'mouse-center-click',
-              fn: async () => {
-                const b = await loc.boundingBox();
-                if (!b) throw new Error('Sem boundingBox');
-                await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
-                await page.waitForTimeout(200);
-                await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2, { delay: 120 });
-              },
-            },
-            {
-              name: 'normal-click',
-              fn: async () => {
-                await loc.click({ timeout: 8000 });
-              },
-            },
-            {
-              name: 'press-enter-after-focus',
-              fn: async () => {
-                await loc.focus({ timeout: 3000 }).catch(() => {});
-                await page.keyboard.press('Enter');
-              },
-            },
-            {
-              name: 'space-after-focus',
-              fn: async () => {
-                await loc.focus({ timeout: 3000 }).catch(() => {});
-                await page.keyboard.press(' ');
-              },
-            },
-            {
-              name: 'force-click',
-              fn: async () => {
-                await loc.click({ timeout: 8000, force: true });
-              },
-            },
-            {
-              name: 'js-click-events',
-              fn: async () => {
-                await loc.evaluate(el => {
-                  el.scrollIntoView({ block: 'center', inline: 'center' });
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(200);
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { delay: 120 });
 
-                  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-                    el.dispatchEvent(new MouseEvent(type, {
-                      bubbles: true,
-                      cancelable: true,
-                      view: window,
-                    }));
-                  }
+    await page.waitForLoadState('domcontentloaded', { timeout: 12000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(2500);
 
-                  if (typeof el.click === 'function') el.click();
-                });
-              },
-            },
-          ];
+    const afterUrl = page.url();
+    const panelClosed = await isCouponPanelClosedAfterContinue(page);
+    const urlMovedToSpc = beforeUrl.includes('/pay') && afterUrl.includes('/spc');
 
-          for (const attempt of attempts) {
-            try {
-              await attempt.fn();
+    result.candidatesDebug.push({
+      selector: result.selector,
+      attempt: 'mouse-center-click',
+      afterUrl,
+      panelClosed,
+      urlMovedToSpc,
+    });
 
-              await page.waitForLoadState('domcontentloaded', { timeout: 12000 }).catch(() => {});
-              await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-              await page.waitForTimeout(2500);
+    result.beforeUrl = beforeUrl;
+    result.afterUrl = afterUrl;
+    result.method = 'mouse-center-click';
+    result.couponPanelClosedAfterContinue = panelClosed;
+    result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
+    result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
 
-              const panelClosed = await isCouponPanelClosedAfterContinue(page);
-              const afterUrl = page.url();
-              const urlMovedToSpc = beforeUrl.includes('/pay') && afterUrl.includes('/spc');
-
-              result.candidatesDebug.push({
-                round,
-                selector: item.selector,
-                index: i,
-                attempt: attempt.name,
-                afterUrl,
-                panelClosed,
-                urlMovedToSpc,
-              });
-
-              if (panelClosed || urlMovedToSpc) {
-                result.clicked = true;
-                result.selector = item.selector;
-                result.method = attempt.name;
-                result.beforeUrl = beforeUrl;
-                result.afterUrl = afterUrl;
-                result.couponPanelClosedAfterContinue = panelClosed;
-                result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
-                result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
-                return result;
-              }
-
-              lastError = `Clique ${attempt.name} executado em ${item.selector}, mas painel continuou aberto.`;
-            } catch (err) {
-              lastError = `${item.selector} / ${attempt.name}: ${err?.message || String(err)}`;
-            }
-          }
-        }
-      }
-
-      await page.waitForTimeout(1000);
+    if (panelClosed || urlMovedToSpc) {
+      result.clicked = true;
+      return result;
     }
 
     result.clicked = false;
-    result.afterUrl = page.url();
-    result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
-    result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
-    result.reachedSummaryAfterClick = await isCheckoutSummaryPageStrictAfterCoupon(page);
-    result.error = lastError || 'Não consegui fechar o painel do cupão clicando no botão de baixo.';
+    result.error = `Clique mouse-center-click executado, mas o painel continuou aberto. before=${beforeUrl} after=${afterUrl}`;
     return result;
   } catch (err) {
     result.clicked = false;
@@ -2789,8 +2243,6 @@ async function clickBottomContinueAfterCouponMessage(page) {
     return result;
   }
 }
-
-
 
 async function applyCouponCodeAtCheckout(page, couponCode) {
   const result = {
