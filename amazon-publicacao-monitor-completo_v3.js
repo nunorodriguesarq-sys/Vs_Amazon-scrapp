@@ -2520,6 +2520,70 @@ async function clickUseThisPaymentMethod(page) {
   return result;
 }
 
+async function clickBottomContinueAfterCouponMessage(page) {
+  const result = {
+    clicked: false,
+    selector: 'testid=bottom-continue-button',
+    method: '',
+    beforeUrl: page.url(),
+    afterUrl: '',
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
+    reachedSummaryAfterClick: false,
+    error: '',
+  };
+
+  try {
+    const button = page.getByTestId('bottom-continue-button').first();
+
+    const count = await button.count().catch(() => 0);
+    if (!count) {
+      result.error = 'Não encontrei page.getByTestId("bottom-continue-button").';
+      result.afterUrl = page.url();
+      return result;
+    }
+
+    await button.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(500);
+
+    try {
+      await button.click({ timeout: 8000 });
+      result.clicked = true;
+      result.method = 'getByTestId-normal-click';
+    } catch (err1) {
+      result.error = err1?.message || String(err1);
+
+      try {
+        await button.click({ timeout: 8000, force: true });
+        result.clicked = true;
+        result.method = 'getByTestId-force-click';
+      } catch (err2) {
+        result.error = `${result.error} | force: ${err2?.message || String(err2)}`;
+      }
+    }
+
+    if (!result.clicked) {
+      result.afterUrl = page.url();
+      return result;
+    }
+
+    await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+
+    result.afterUrl = page.url();
+    result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
+    result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
+    result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    result.afterUrl = page.url();
+    return result;
+  }
+}
+
 
 async function applyCouponCodeAtCheckout(page, couponCode) {
   const result = {
@@ -2709,7 +2773,7 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
       return result;
     }
 
-    const continueResult = await clickUseThisPaymentMethod(page);
+    const continueResult = await clickBottomContinueAfterCouponMessage(page);
 
     result.continueClick = continueResult;
 
@@ -2720,10 +2784,12 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
       result.method = continueResult.method;
       result.afterContinueUrl = continueResult.afterUrl;
       result.reachedSummaryAfterContinue = continueResult.reachedSummaryAfterClick;
+      result.couponPanelClosedAfterContinue = continueResult.couponPanelClosedAfterContinue;
+      result.hasCheckoutTotalsAfterContinue = continueResult.hasCheckoutTotalsAfterContinue;
       return result;
     }
 
-    result.error = continueResult.error || 'Falha ao clicar em "Utilizar esta forma de pagamento".';
+    result.error = continueResult.error || 'Falha ao clicar em bottom-continue-button depois da mensagem do cupão.';
     return result;
 
 
