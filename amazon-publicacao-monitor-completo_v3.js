@@ -2523,42 +2523,89 @@ async function clickUseThisPaymentMethod(page) {
 async function clickBottomContinueAfterCouponMessage(page) {
   const result = {
     clicked: false,
-    selector: 'testid=bottom-continue-button',
+    selector: '#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]',
     method: '',
     beforeUrl: page.url(),
     afterUrl: '',
     couponPanelClosedAfterContinue: false,
     hasCheckoutTotalsAfterContinue: false,
     reachedSummaryAfterClick: false,
+    candidatesDebug: [],
     error: '',
   };
 
   try {
-    const button = page.getByTestId('bottom-continue-button').first();
+    await page.waitForTimeout(1000);
+
+    const button = page.locator('#checkout-primary-continue-button-id input[data-testid="bottom-continue-button"]').first();
 
     const count = await button.count().catch(() => 0);
+
+    result.candidatesDebug.push({
+      selector: result.selector,
+      count,
+    });
+
     if (!count) {
-      result.error = 'Não encontrei page.getByTestId("bottom-continue-button").';
+      result.error = 'Não encontrei o botão de baixo #checkout-primary-continue-button-id input[data-testid="bottom-continue-button"].';
       result.afterUrl = page.url();
       return result;
     }
 
     await button.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(700);
+
+    const visibleBefore = await button.isVisible().catch(() => false);
+    const enabledBefore = await button.isEnabled().catch(() => false);
+    const valueBefore = await button.getAttribute('value').catch(() => '');
+    const ariaBefore = await button.getAttribute('aria-labelledby').catch(() => '');
+
+    result.candidatesDebug.push({
+      selector: result.selector,
+      visibleBefore,
+      enabledBefore,
+      valueBefore,
+      ariaBefore,
+    });
+
+    if (!enabledBefore) {
+      result.error = 'O botão de baixo existe, mas não está enabled.';
+      result.afterUrl = page.url();
+      return result;
+    }
 
     try {
       await button.click({ timeout: 8000 });
       result.clicked = true;
-      result.method = 'getByTestId-normal-click';
+      result.method = 'primary-bottom-normal-click';
     } catch (err1) {
       result.error = err1?.message || String(err1);
 
       try {
-        await button.click({ timeout: 8000, force: true });
-        result.clicked = true;
-        result.method = 'getByTestId-force-click';
+        const box = await button.boundingBox();
+
+        if (box) {
+          await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+          await page.waitForTimeout(200);
+          await page.mouse.down();
+          await page.waitForTimeout(120);
+          await page.mouse.up();
+
+          result.clicked = true;
+          result.method = 'primary-bottom-mouse-click';
+        }
       } catch (err2) {
-        result.error = `${result.error} | force: ${err2?.message || String(err2)}`;
+        result.error = `${result.error} | mouse: ${err2?.message || String(err2)}`;
+      }
+
+      if (!result.clicked) {
+        try {
+          await button.click({ timeout: 8000, force: true });
+          result.clicked = true;
+          result.method = 'primary-bottom-force-click';
+        } catch (err3) {
+          result.error = `${result.error} | force: ${err3?.message || String(err3)}`;
+        }
       }
     }
 
@@ -2569,12 +2616,21 @@ async function clickBottomContinueAfterCouponMessage(page) {
 
     await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(3000);
 
     result.afterUrl = page.url();
     result.couponPanelClosedAfterContinue = await isCouponPanelClosedAfterContinue(page);
     result.hasCheckoutTotalsAfterContinue = await hasCheckoutTotalsVisible(page);
     result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+
+    // Importante:
+    // Neste fluxo NÃO validar sucesso apenas com hasCheckoutTotalsAfterContinue,
+    // porque os totais já aparecem antes na lateral.
+    if (!result.couponPanelClosedAfterContinue && !result.reachedSummaryAfterClick) {
+      result.clicked = false;
+      result.error = `Clique executado no botão de baixo por ${result.method}, mas o painel do cupão não fechou.`;
+      return result;
+    }
 
     return result;
   } catch (err) {
@@ -2583,6 +2639,7 @@ async function clickBottomContinueAfterCouponMessage(page) {
     return result;
   }
 }
+
 
 
 async function applyCouponCodeAtCheckout(page, couponCode) {
@@ -2777,7 +2834,7 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
 
     result.continueClick = continueResult;
 
-    if (continueResult.clicked) {
+    if (continueResult.clicked && (continueResult.couponPanelClosedAfterContinue || continueResult.reachedSummaryAfterClick)) {
       result.submitted = true;
       result.continuedAfterCouponMessage = true;
       result.buttonSelector = continueResult.selector;
@@ -2789,7 +2846,7 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
       return result;
     }
 
-    result.error = continueResult.error || 'Falha ao clicar em bottom-continue-button depois da mensagem do cupão.';
+    result.error = continueResult.error || 'Falha ao clicar no botão de baixo depois da mensagem do cupão.';
     return result;
 
 
