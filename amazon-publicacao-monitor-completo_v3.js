@@ -728,6 +728,9 @@ async function ensureCouponApplied(page) {
     selector: '',
     method: '',
     text: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -794,6 +797,9 @@ async function applyCouponCheckboxIfPresent(page) {
     selector: '',
     method: '',
     text: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -996,6 +1002,9 @@ async function selectSubscribeAndSaveQuantity(page, quantity) {
     optionSelector: '',
     optionClickMethod: '',
     selectedValue: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -1110,6 +1119,9 @@ async function selectQuantityByVisualDropdown(page, quantity, mode = 'normal') {
     dropdownSelector: '',
     optionSelector: '',
     selectedValue: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -1192,6 +1204,9 @@ async function selectQuantity(page, quantity, mode = 'normal') {
     selectedValue: '',
     availableOptions: [],
     method: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -1295,6 +1310,9 @@ async function selectSubscribeAndSaveOption(page) {
     attempted: true,
     selected: false,
     selector: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -1363,6 +1381,9 @@ async function clickSubscribeNow(page) {
     clicked: false,
     selector: '',
     method: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -1535,6 +1556,9 @@ async function simulateCheckout(page, product, options = {}) {
     finalPrice: '',
     subtotal: '',
     discountText: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -1855,29 +1879,80 @@ async function waitForCouponApplyMessage(page, timeout = 12000) {
   };
 }
 
+async function isCouponPanelClosedAfterContinue(page) {
+  const inputCount = await page.getByTestId('input-claim-code-text-input').count().catch(() => 0);
+  const inputVisible = inputCount > 0
+    ? await page.getByTestId('input-claim-code-text-input').first().isVisible().catch(() => false)
+    : false;
+
+  const pressableCount = await page.getByTestId('input-claim-code-pressable').count().catch(() => 0);
+  const pressableVisible = pressableCount > 0
+    ? await page.getByTestId('input-claim-code-pressable').first().isVisible().catch(() => false)
+    : false;
+
+  if (!inputVisible && !pressableVisible) return true;
+
+  const activeElementTag = await page.evaluate(() => document.activeElement?.tagName || '').catch(() => '');
+  if (!inputVisible && String(activeElementTag).toLowerCase() !== 'input') return true;
+
+  return false;
+}
+
+async function hasCheckoutTotalsVisible(page) {
+  const selectors = [
+    '[data-shimmer-target="ordertotals-amount"]',
+    '.order-summary-line-definition [data-shimmer-target="ordertotals-amount"]',
+    '#subtotals-marketplace-table [data-shimmer-target="ordertotals-amount"]',
+    'text=/Valor total/i',
+    'text=/Total do pedido/i',
+    'text=/Total del pedido/i',
+    'text=/Produtos:/i',
+    'text=/Productos:/i',
+    'text=/Poupanças/i',
+    'text=/Ahorros/i',
+    'text=/Promoção aplicada/i',
+    'text=/Promoción aplicada/i',
+  ];
+
+  for (const selector of selectors) {
+    const count = await page.locator(selector).count().catch(() => 0);
+    if (count > 0) return true;
+  }
+
+  const body = await safeText(page, 'body');
+  return /valor total|total do pedido|total del pedido|produtos:|productos:|poupanças|ahorros|promoção aplicada|promoción aplicada/i.test(body);
+}
+
 async function isCheckoutSummaryPage(page) {
   const url = page.url();
+
+  const hasTotals = await hasCheckoutTotalsVisible(page);
+
+  if (url.includes('/checkout/') && url.includes('/pay') && hasTotals) {
+    return true;
+  }
 
   if (url.includes('/checkout/') && !url.includes('/pay')) {
     return true;
   }
 
-  const summarySelectors = [
-    '[data-shimmer-target="ordertotals-amount"]',
-    '.order-summary-line-definition [data-shimmer-target="ordertotals-amount"]',
-    '#subtotals-marketplace-table [data-shimmer-target="ordertotals-amount"]',
-    'text=/Total do pedido/i',
-    'text=/Total del pedido/i',
+  const strictSummarySelectors = [
     'text=/Faça o seu pedido/i',
     'text=/Realizar pedido/i',
+    'text=/Finalizar compra/i',
+    'text=/Place your order/i',
+    'input[name="placeYourOrder1"]',
+    '#placeYourOrder',
+    '[data-testid="place-order-button"]',
+    'input[aria-labelledby*="submitOrderButtonId"]',
   ];
 
-  for (const selector of summarySelectors) {
+  for (const selector of strictSummarySelectors) {
     const count = await page.locator(selector).count().catch(() => 0);
     if (count > 0) return true;
   }
 
-  return false;
+  return hasTotals;
 }
 
 
@@ -1888,6 +1963,9 @@ async function clickBottomContinueButton(page) {
     method: '',
     beforeUrl: page.url(),
     afterUrl: '',
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
@@ -1929,9 +2007,36 @@ async function clickBottomContinueButton(page) {
       await loc.scrollIntoViewIfNeeded().catch(() => {});
       await page.waitForTimeout(500);
 
-      const clickResult = await clickLocatorRobust(loc, {
+      let clickResult = { clicked: false, method: '', error: '' };
+
+      await loc.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(200);
+
+      clickResult = await clickLocatorRobust(loc, {
         selector: item.selector,
+        methods: ['click'],
       });
+
+      if (!clickResult.clicked) {
+        clickResult = await clickLocatorRobust(loc, {
+          selector: item.selector,
+          methods: ['force'],
+        });
+      }
+
+      if (!clickResult.clicked) {
+        clickResult = await clickLocatorRobust(loc, {
+          selector: item.selector,
+          methods: ['coords'],
+        });
+      }
+
+      if (!clickResult.clicked) {
+        clickResult = await clickLocatorRobust(loc, {
+          selector: item.selector,
+          methods: ['enter'],
+        });
+      }
 
       if (clickResult.clicked) {
         result.clicked = true;
@@ -1944,7 +2049,16 @@ async function clickBottomContinueButton(page) {
         await page.waitForTimeout(3000);
 
         result.afterUrl = page.url();
-        return result;
+        const panelClosed = await isCouponPanelClosedAfterContinue(page);
+        const hasTotals = await hasCheckoutTotalsVisible(page);
+        result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+        result.couponPanelClosedAfterContinue = panelClosed;
+        result.hasCheckoutTotalsAfterContinue = hasTotals;
+
+        if (result.reachedSummaryAfterClick || panelClosed || hasTotals) {
+          result.clicked = true;
+          return result;
+        }
       }
 
       result.error = clickResult.error || `Falha ao clicar em ${item.selector}`;
@@ -1964,6 +2078,8 @@ async function clickUseThisPaymentMethod(page) {
     beforeUrl: page.url(),
     afterUrl: '',
     reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     attempts: [],
     error: '',
   };
@@ -1976,16 +2092,28 @@ async function clickUseThisPaymentMethod(page) {
     method: bottomClick.method,
     beforeUrl: bottomClick.beforeUrl,
     afterUrl: bottomClick.afterUrl,
-    reachedSummaryAfterClick: bottomClick.clicked ? await isCheckoutSummaryPage(page) : false,
+    reachedSummaryAfterClick: bottomClick.reachedSummaryAfterClick || false,
+    couponPanelClosedAfterContinue: bottomClick.couponPanelClosedAfterContinue || false,
+    hasCheckoutTotalsAfterContinue: bottomClick.hasCheckoutTotalsAfterContinue || false,
     error: bottomClick.error || '',
   });
 
-  if (bottomClick.clicked) {
+  const bottomSucceeded =
+    bottomClick.clicked &&
+    (
+      bottomClick.reachedSummaryAfterClick ||
+      bottomClick.couponPanelClosedAfterContinue ||
+      bottomClick.hasCheckoutTotalsAfterContinue
+    );
+
+  if (bottomSucceeded) {
     result.clicked = true;
     result.selector = bottomClick.selector;
     result.method = bottomClick.method;
     result.afterUrl = page.url();
     result.reachedSummaryAfterClick = await isCheckoutSummaryPage(page);
+    result.couponPanelClosedAfterContinue = bottomClick.couponPanelClosedAfterContinue;
+    result.hasCheckoutTotalsAfterContinue = bottomClick.hasCheckoutTotalsAfterContinue;
     return result;
   }
 
@@ -2081,7 +2209,7 @@ async function clickUseThisPaymentMethod(page) {
 
       result.attempts.push(attempt);
 
-      if (attempt.reachedSummaryAfterClick || !attempt.afterUrl.includes('/pay')) {
+      if (attempt.reachedSummaryAfterClick) {
         result.clicked = true;
         result.selector = item.selector;
         result.method = clickResult.method;
@@ -2093,7 +2221,7 @@ async function clickUseThisPaymentMethod(page) {
   }
 
   result.afterUrl = page.url();
-  result.error = 'Cliquei/tentei os botões de continuar, mas não consegui sair da etapa de pagamento para o resumo.';
+  result.error = 'Cliquei/tentei os botões de continuar, mas não consegui confirmar o avanço para o resumo.';
   return result;
 }
 
@@ -2118,6 +2246,9 @@ async function applyCouponCodeAtCheckout(page, couponCode) {
     couponMessageText: '',
     couponMessageStatus: 'unknown',
     continuedAfterCouponMessage: false,
+    reachedSummaryAfterClick: false,
+    couponPanelClosedAfterContinue: false,
+    hasCheckoutTotalsAfterContinue: false,
     error: '',
   };
 
