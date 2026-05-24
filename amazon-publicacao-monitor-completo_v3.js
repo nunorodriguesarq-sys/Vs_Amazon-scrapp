@@ -78,7 +78,7 @@ const SELECTORS = {
     '#sns-base-price .a-price .a-offscreen',
   ],
 
-  pvp: [
+  pvpReal: [
     '#corePriceDisplay_desktop_feature_div .basisPrice .apex-basisprice-value > span.a-offscreen',
     '#corePriceDisplay_desktop_feature_div > div:nth-child(5) > span > span.aok-relative > span.a-size-small.a-color-secondary.aok-align-center.basisPrice > span > span:nth-child(2)',
     '#corePriceDisplay_desktop_feature_div > div.a-section.a-spacing-none.aok-align-center.aok-relative.apex-core-price-identifier > div.apex-savings-basis-container > div.apex-basis-row > span.aok-relative > span.a-size-small.a-color-secondary.basisPrice > span > span:nth-child(2)',
@@ -86,8 +86,14 @@ const SELECTORS = {
     '#corePriceDisplay_desktop_feature_div > div.a-section.a-spacing-small.aok-align-center > span > span.aok-relative > span > span > span.a-offscreen',
     '#listPrice .a-offscreen',
     '.basisPrice .a-offscreen',
-    '#corePrice_feature_div .a-price .a-offscreen',
+  ],
+
+  keepaMedio: [
     '#keepa-medio-valor',
+  ],
+
+  pvpFallbackPossiblyCurrentPrice: [
+    '#corePrice_feature_div .a-price .a-offscreen',
   ],
 
   primeExclusive: [
@@ -250,6 +256,15 @@ function parsePriceNumber(text) {
 
   const n = Number.parseFloat(s);
   return Number.isFinite(n) ? n : null;
+}
+
+function samePrice(a, b) {
+  const na = parsePriceNumber(a);
+  const nb = parsePriceNumber(b);
+
+  if (na == null || nb == null) return false;
+
+  return Math.abs(na - nb) < 0.01;
 }
 
 
@@ -437,6 +452,73 @@ async function ensureNotAtFinalOrderButton(page) {
 // EXTRAÇÃO DE DADOS
 // =====================================================
 
+async function extractPvpSmart(page, price) {
+  const result = {
+    value: '',
+    source: '',
+    raw: '',
+    rejected: [],
+  };
+
+  const realPvpRaw = await firstText(page, SELECTORS.pvpReal);
+  const realPvp = normalizePriceText(realPvpRaw);
+
+  if (realPvp && !samePrice(realPvp, price)) {
+    result.value = realPvp;
+    result.source = 'pvp-real';
+    result.raw = realPvpRaw;
+    return result;
+  }
+
+  if (realPvp && samePrice(realPvp, price)) {
+    result.rejected.push({
+      source: 'pvp-real',
+      value: realPvp,
+      reason: 'igual ao preço atual',
+    });
+  }
+
+  const keepaRaw = await firstText(page, SELECTORS.keepaMedio);
+  const keepaPvp = normalizePriceText(keepaRaw);
+
+  if (keepaPvp && !samePrice(keepaPvp, price)) {
+    result.value = keepaPvp;
+    result.source = 'keepa-medio';
+    result.raw = keepaRaw;
+    return result;
+  }
+
+  if (keepaPvp && samePrice(keepaPvp, price)) {
+    result.rejected.push({
+      source: 'keepa-medio',
+      value: keepaPvp,
+      reason: 'igual ao preço atual',
+    });
+  }
+
+  const fallbackRaw = await firstText(page, SELECTORS.pvpFallbackPossiblyCurrentPrice);
+  const fallbackPvp = normalizePriceText(fallbackRaw);
+
+  if (fallbackPvp && !samePrice(fallbackPvp, price)) {
+    result.value = fallbackPvp;
+    result.source = 'fallback-possibly-current-price';
+    result.raw = fallbackRaw;
+    return result;
+  }
+
+  if (fallbackPvp) {
+    result.rejected.push({
+      source: 'fallback-possibly-current-price',
+      value: fallbackPvp,
+      reason: 'igual ao preço atual, provavelmente não é PVP',
+    });
+  }
+
+  result.value = '';
+  result.source = 'none';
+  return result;
+}
+
 async function scrapeProductPage(page, productUrl, productInput = {}) {
   await page.goto(productUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await maybeClosePopups(page);
@@ -448,7 +530,9 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
   const title = await safeText(page, SELECTORS.title);
   const price = normalizePriceText(await firstText(page, SELECTORS.price));
   const snsPrice = normalizePriceText(await firstText(page, SELECTORS.snsPrice));
-  const pvp = normalizePriceText(await firstText(page, SELECTORS.pvp));
+
+  const pvpDebug = await extractPvpSmart(page, price || snsPrice);
+  const pvp = pvpDebug.value;
   const bullets = await allTexts(page, SELECTORS.bullets, 12);
   const breadcrumbs = await allTexts(page, SELECTORS.breadcrumbs, 12);
 
@@ -514,6 +598,7 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
     price,
     snsPrice,
     pvp,
+    pvpDebug,
     checkoutDiscountMessage,
     checkoutDiscountMessageIsGenericEligible,
     bullets,
@@ -2697,11 +2782,11 @@ function getBestPrice(product) {
 }
 
 function getPvp(product) {
-  return formatPvp(product.pvp || product.price || '');
+  return formatPvp(product.pvp || '');
 }
 function getUnitsPvp(product) {
   const quantity = Number(product.checkoutStrategy?.quantity || 1);
-  const basePvp = product.pvp || product.price || '';
+  const basePvp = product.pvp || '';
 
   if (!basePvp) return '⚠️ERRO';
 
