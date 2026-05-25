@@ -120,6 +120,11 @@ const SELECTORS = {
     '#promoPriceBlockMessage_feature_div > div > span > div:nth-child(2) > span > div > div > div',
     '#promoPriceBlockMessage_feature_div',
   ],
+  unitPromotionMessage: [
+    '[id^="promoMessagepctch"]',
+    '#promoPriceBlockMessage_feature_div [id^="promoMessagepctch"]',
+    '#promoPriceBlockMessage_feature_div',
+  ],
 
   category: '.pg-cat',
   subcategory: '.pg-subcat',
@@ -421,13 +426,67 @@ function detectUnitPromotionText(text) {
     if (clean.includes(promoText)) return promoText;
   }
 
+  const patterns = [
+    {
+      re: /poup(?:e|ar)\s+[\d,.]+\s*(?:€|%)?\s+em\s+2\s+ou\s+mais/i,
+      label: 'Poupe em 2 ou mais',
+    },
+    {
+      re: /poup(?:e|ar)\s+[\d,.]+\s*(?:€|%)?\s+em\s+3\s+ou\s+mais/i,
+      label: 'Poupe em 3 ou mais',
+    },
+    {
+      re: /ahorr(?:a|e|ar)\s+[\d,.]+\s*(?:€|%)?\s+en\s+2\s+o\s+m[aá]s/i,
+      label: 'Poupe em 2 ou mais',
+    },
+    {
+      re: /ahorr(?:a|e|ar)\s+[\d,.]+\s*(?:€|%)?\s+en\s+3\s+o\s+m[aá]s/i,
+      label: 'Poupe em 3 ou mais',
+    },
+    {
+      re: /em\s+2\s+ou\s+mais/i,
+      label: 'Poupe em 2 ou mais',
+    },
+    {
+      re: /em\s+3\s+ou\s+mais/i,
+      label: 'Poupe em 3 ou mais',
+    },
+    {
+      re: /en\s+2\s+o\s+m[aá]s/i,
+      label: 'Poupe em 2 ou mais',
+    },
+    {
+      re: /en\s+3\s+o\s+m[aá]s/i,
+      label: 'Poupe em 3 ou mais',
+    },
+  ];
+
+  for (const item of patterns) {
+    if (item.re.test(clean)) return item.label;
+  }
+
   return '';
 }
 
 function getQuantityForUnitPromotion(unitPromotionText) {
-  if (unitPromotionText === 'Obtenha 3 pelo preço de 2') return 3;
-  if (unitPromotionText === 'Poupe 70% em 1 na compra de2') return 2;
-  if (unitPromotionText === 'Poupe 50% em 1 na compra de2') return 2;
+  const text = cleanSpaces(unitPromotionText);
+
+  if (text === 'Obtenha 3 pelo preço de 2') return 3;
+  if (text === 'Poupe 70% em 1 na compra de2') return 2;
+  if (text === 'Poupe 50% em 1 na compra de2') return 2;
+
+  if (/3\s+ou\s+mais/i.test(text)) return 3;
+  if (/3\s+o\s+m[aá]s/i.test(text)) return 3;
+  if (/em\s+3/i.test(text)) return 3;
+  if (/en\s+3/i.test(text)) return 3;
+  if (text === 'Poupe em 3 ou mais') return 3;
+
+  if (/2\s+ou\s+mais/i.test(text)) return 2;
+  if (/2\s+o\s+m[aá]s/i.test(text)) return 2;
+  if (/em\s+2/i.test(text)) return 2;
+  if (/en\s+2/i.test(text)) return 2;
+  if (text === 'Poupe em 2 ou mais') return 2;
+
   return 1;
 }
 
@@ -675,6 +734,8 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
 
   const bodyText = await safeText(page, 'body');
   const checkoutDiscountMessage = await firstText(page, SELECTORS.checkoutDiscountMessage);
+  const unitPromotionMessage = await firstText(page, SELECTORS.unitPromotionMessage);
+  const unitPromotionSearchText = `${bodyText} ${checkoutDiscountMessage} ${unitPromotionMessage}`;
   const checkoutDiscountMessageIsGenericEligible =
     isGenericEligibleItemsMessage(checkoutDiscountMessage);
   const hasCouponCheckboxDom = await page.locator([
@@ -691,6 +752,7 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
   const signals = detectSignals({
     bodyText,
     checkoutDiscountMessage,
+    unitPromotionSearchText,
     primeText,
     primeDayText,
     price,
@@ -737,6 +799,7 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
     sellerText,
     keepaStats,
     checkoutDiscountMessage,
+    unitPromotionMessage,
     checkoutDiscountMessageIsGenericEligible,
     bullets,
     breadcrumbs,
@@ -919,7 +982,7 @@ function isGenericEligibleItemsMessage(text) {
   );
 }
 
-function detectSignals({ bodyText, checkoutDiscountMessage = '', primeText, primeDayText, price, snsPrice, pvp }) {
+function detectSignals({ bodyText, checkoutDiscountMessage = '', unitPromotionSearchText = '', primeText, primeDayText, price, snsPrice, pvp }) {
   const text = cleanSpaces(bodyText);
 
   const hasSubscribeAndSave = includesAny(text, [
@@ -970,7 +1033,7 @@ function detectSignals({ bodyText, checkoutDiscountMessage = '', primeText, prim
     'Exclusivo Prime',
   ]);
 
-  const unitPromotionText = detectUnitPromotionText(text);
+  const unitPromotionText = detectUnitPromotionText(`${text} ${unitPromotionSearchText}`);
   const hasUnitsPromotion = Boolean(unitPromotionText);
 
   const hasCouponCodeOnlyAtCheckout = false;
