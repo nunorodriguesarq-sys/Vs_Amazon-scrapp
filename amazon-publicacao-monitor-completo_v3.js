@@ -39,6 +39,9 @@ const HEADLESS = false;
 const OUTPUT_TXT = path.resolve('publicacoes-geradas.txt');
 const OUTPUT_JSON = path.resolve('resultado-scraping-amazon.json');
 
+const KEEPA_API_KEY = process.env.KEEPA_API_KEY || 'du5q7r60uaapbo4npgj3j5jv6n791ctduit7a58o45kneneen1su4orltqnjc570';
+const KEEPA_DOMAIN_ID = 9;
+
 // Segurança: o script NUNCA deve clicar no botão final de compra.
 const NEVER_CLICK_SELECTORS = [
   'input[name="placeYourOrder1"]',
@@ -76,6 +79,13 @@ const SELECTORS = {
   snsPrice: [
     '#sns-base-price > div > div > div > span.a-price.a-text-normal.aok-align-center.reinventPriceAccordionT2 > span.a-offscreen',
     '#sns-base-price .a-price .a-offscreen',
+  ],
+
+  merchantSeller: [
+    '#merchantInfoFeature_feature_div > div.offer-display-feature-text.a-size-small > div.offer-display-feature-text.a-spacing-none.odf-truncation-popover > span',
+    '#merchantInfoFeature_feature_div span',
+    '#merchant-info',
+    '#sellerProfileTriggerId',
   ],
 
   pvpReal: [
@@ -229,6 +239,117 @@ function ensureEuro(text) {
   const s = priceWithoutEuro(text);
   if (!s) return '';
   return `${s}€`;
+}
+
+function normalizeKeepaPrice(value) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n) || n <= 0) return '';
+
+  return `${(n / 100).toFixed(2).replace('.', ',')}€`;
+}
+
+function isAmazonSellerText(text) {
+  const clean = cleanSpaces(text).toLowerCase();
+
+  return (
+    clean.includes('amazon') ||
+    clean.includes('vendido por amazon') ||
+    clean.includes('enviado y vendido por amazon') ||
+    clean.includes('vendido y enviado por amazon')
+  );
+}
+
+async function fetchKeepaStats(asin, sellerText = '') {
+  const result = {
+    attempted: false,
+    ok: false,
+    asin,
+    sellerText: cleanSpaces(sellerText),
+    sellerType: '',
+    selectedIndex: null,
+    avg90Amazon: '',
+    avg90External: '',
+    selectedAvg90: '',
+    isLowestAmazon: false,
+    isLowestExternal: false,
+    selectedIsLowest: false,
+    rawAvg90Amazon: null,
+    rawAvg90External: null,
+    rawIsLowestAmazon: null,
+    rawIsLowestExternal: null,
+    error: '',
+  };
+
+  if (!asin) {
+    result.error = 'ASIN vazio.';
+    return result;
+  }
+
+  if (!KEEPA_API_KEY) {
+    result.error = 'KEEPA_API_KEY vazio.';
+    return result;
+  }
+
+  result.attempted = true;
+
+  try {
+    const sellerIsAmazon = isAmazonSellerText(sellerText);
+
+    result.sellerType = sellerIsAmazon ? 'amazon' : 'external';
+    result.selectedIndex = sellerIsAmazon ? 0 : 18;
+
+    const url =
+      `https://api.keepa.com/product?key=${encodeURIComponent(KEEPA_API_KEY)}` +
+      `&domain=${encodeURIComponent(String(KEEPA_DOMAIN_ID))}` +
+      `&asin=${encodeURIComponent(asin)}` +
+      '&stats=90&buybox=1&history=0';
+
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      result.error = `Keepa HTTP ${res.status}: ${await res.text().catch(() => '')}`;
+      return result;
+    }
+
+    const json = await res.json();
+
+    const product = Array.isArray(json.products) ? json.products[0] : null;
+
+    if (!product?.stats) {
+      result.error = 'Resposta Keepa sem product.stats.';
+      return result;
+    }
+
+    const stats = product.stats || {};
+    const avg90 = stats.avg90 || [];
+    const isLowest = stats.isLowest || [];
+
+    result.rawAvg90Amazon = avg90[0] ?? null;
+    result.rawAvg90External = avg90[18] ?? null;
+    result.rawIsLowestAmazon = isLowest[0] ?? null;
+    result.rawIsLowestExternal = isLowest[18] ?? null;
+
+    result.avg90Amazon = normalizeKeepaPrice(avg90[0]);
+    result.avg90External = normalizeKeepaPrice(avg90[18]);
+
+    result.isLowestAmazon = Boolean(isLowest[0]);
+    result.isLowestExternal = Boolean(isLowest[18]);
+
+    result.selectedAvg90 = sellerIsAmazon
+      ? result.avg90Amazon
+      : result.avg90External;
+
+    result.selectedIsLowest = sellerIsAmazon
+      ? result.isLowestAmazon
+      : result.isLowestExternal;
+
+    result.ok = true;
+    return result;
+  } catch (err) {
+    result.error = err?.message || String(err);
+    return result;
+  }
 }
 
 function normalizeProductInput(input) {
@@ -531,8 +652,19 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
   const price = normalizePriceText(await firstText(page, SELECTORS.price));
   const snsPrice = normalizePriceText(await firstText(page, SELECTORS.snsPrice));
 
+  const sellerText = await firstText(page, SELECTORS.merchantSeller);
+
   const pvpDebug = await extractPvpSmart(page, price || snsPrice);
-  const pvp = pvpDebug.value;
+  let pvp = pvpDebug.value;
+
+  const keepaStats = await fetchKeepaStats(asin, sellerText);
+
+  if (!pvp && keepaStats?.selectedAvg90) {
+    pvp = keepaStats.selectedAvg90;
+    pvpDebug.value = pvp;
+    pvpDebug.source = 'keepa-selected-avg90-fallback';
+    pvpDebug.raw = keepaStats.selectedAvg90;
+  }
   const bullets = await allTexts(page, SELECTORS.bullets, 12);
   const breadcrumbs = await allTexts(page, SELECTORS.breadcrumbs, 12);
 
@@ -599,6 +731,8 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
     snsPrice,
     pvp,
     pvpDebug,
+    sellerText,
+    keepaStats,
     checkoutDiscountMessage,
     checkoutDiscountMessageIsGenericEligible,
     bullets,
@@ -3164,7 +3298,11 @@ async function processProduct(context, input, page) {
     console.log(`✅ Checkout: ${product.checkout.finalPrice || 'sem preço final'} ${product.checkout.error ? `| Erro: ${product.checkout.error}` : ''}`);
   }
 
-  product.publication = formatPublication(product);
+  const publicationFlags = {
+    minimoHistorico: Boolean(product.keepaStats?.selectedIsLowest),
+  };
+
+  product.publication = formatPublication(product, publicationFlags);
   return product;
 }
 
