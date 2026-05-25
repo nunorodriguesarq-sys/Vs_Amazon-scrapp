@@ -677,7 +677,6 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
   const checkoutDiscountMessage = await firstText(page, SELECTORS.checkoutDiscountMessage);
   const checkoutDiscountMessageIsGenericEligible =
     isGenericEligibleItemsMessage(checkoutDiscountMessage);
-  const combinedTextForSignals = `${bodyText} ${checkoutDiscountMessage}`;
   const hasCouponCheckboxDom = await page.locator([
     'input[id^="checkmarkpctch"]',
     '[id^="checkmarkpctch"]',
@@ -690,13 +689,17 @@ async function scrapeProductPage(page, productUrl, productInput = {}) {
 
   const couponCode = productInput.manualCouponCode || '';
   const signals = detectSignals({
-    bodyText: combinedTextForSignals,
+    bodyText,
+    checkoutDiscountMessage,
     primeText,
     primeDayText,
     price,
     snsPrice,
     pvp,
   });
+  if (!checkoutDiscountMessage) {
+    signals.hasCheckoutDiscount = false;
+  }
   if (checkoutDiscountMessageIsGenericEligible && !/finalizar|checkout|tramitar|concluir/i.test(checkoutDiscountMessage)) {
     signals.hasCheckoutDiscount = false;
   }
@@ -916,7 +919,7 @@ function isGenericEligibleItemsMessage(text) {
   );
 }
 
-function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp }) {
+function detectSignals({ bodyText, checkoutDiscountMessage = '', primeText, primeDayText, price, snsPrice, pvp }) {
   const text = cleanSpaces(bodyText);
 
   const hasSubscribeAndSave = includesAny(text, [
@@ -931,7 +934,9 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
 
   const hasApplyCoupon = hasAppliedCoupon || hasRealCouponCheckboxText(text);
 
-  const hasCheckoutDiscount = includesAny(text, [
+  const checkoutText = cleanSpaces(checkoutDiscountMessage);
+  const hasCheckoutDiscount = Boolean(checkoutText) && (
+    includesAny(checkoutText, [
     'descuento en el checkout',
     'desconto no checkout',
     'se aplicará al finalizar la compra',
@@ -944,10 +949,11 @@ function detectSignals({ bodyText, primeText, primeDayText, price, snsPrice, pvp
     'al finalizar la compra',
     'al tramitar el pedido',
   ]) ||
-/poup(?:ar|e)\s+[\d,.]+\s*(?:€|%)?.{0,120}ao\s+finalizar\s+(?:a\s+)?compra/i.test(text) ||
-/ahorr(?:a|ar)\s+[\d,.]+\s*(?:€|%)?.{0,120}al\s+finalizar\s+la\s+compra/i.test(text) ||
-/poup(?:ar|e).{0,120}finalizar\s+(?:a\s+)?compra/i.test(text) ||
-/ahorr(?:a|ar).{0,120}finalizar\s+la\s+compra/i.test(text);
+  /poup(?:ar|e)\s+[\d,.]+\s*(?:€|%)?.{0,120}ao\s+finalizar\s+(?:a\s+)?compra/i.test(checkoutText) ||
+  /ahorr(?:a|ar)\s+[\d,.]+\s*(?:€|%)?.{0,120}al\s+finalizar\s+la\s+compra/i.test(checkoutText) ||
+  /poup(?:ar|e).{0,120}finalizar\s+(?:a\s+)?compra/i.test(checkoutText) ||
+  /ahorr(?:a|ar).{0,120}finalizar\s+la\s+compra/i.test(checkoutText)
+  );
 
   const hasFlashSale = includesAny(text, [
     'Oferta flash',
